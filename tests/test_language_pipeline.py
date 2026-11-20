@@ -13,6 +13,7 @@ from video_turbo.database import Database
 from video_turbo.i18n import render
 from video_turbo.models import JobState, SourceKind
 from video_turbo.orchestrator.processor import Orchestrator, ReprocessError
+from video_turbo.source_paths import text as path_text
 
 SOURCE_SRT = """1
 00:00:01,000 --> 00:00:03,000
@@ -99,7 +100,7 @@ def test_english_text_subtitle_job_publishes_simplified_chinese(tmp_path, monkey
     assert (job["source_language"], job["target_language"]) == ("en", "zh-CN")
     assert job["source_kind"] == SourceKind.EXTERNAL_TEXT
     published = root / "movie.zh.default.srt"
-    assert job["subtitle_path"] == str(published)
+    assert job["subtitle_path"] == path_text(published)
     assert "你好。" in render(published.read_text(encoding="utf-8"))
     assert requests[0]["instructions"].startswith("你是专业的英语影视中文字幕译者")
 
@@ -128,13 +129,13 @@ def test_japanese_to_english_job_publishes_english_subtitle(tmp_path, monkeypatc
 
     assert job["state"] == JobState.COMPLETED, job["last_error"]
     published = root / "movie.en.default.srt"
-    assert job["subtitle_path"] == str(published)
+    assert job["subtitle_path"] == path_text(published)
     content = published.read_text(encoding="utf-8")
     # 英文按词折成两行。
     assert "I never thought I would see you again,\nnot after everything." in content
     assert requests[0]["instructions"].startswith("你是专业的日语影视英文字幕译者")
     detail = orchestrator.job_detail(job["id"])
-    assert detail["published_subtitle_path"] == str(published)
+    assert detail["published_subtitle_path"] == path_text(published)
 
 
 def test_pending_job_follows_library_language_change(tmp_path, monkeypatch) -> None:

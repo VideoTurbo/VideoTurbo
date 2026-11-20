@@ -57,11 +57,13 @@ def test_local_preview_uses_same_config_without_enabling_pipeline(
     tmp_path: Path, monkeypatch
 ) -> None:
     path = tmp_path / "config.yaml"
-    original = """
+    # 本地媒体库要写本机的完整路径：Windows 上以盘符开头。
+    library = "C:/media/nas" if os.name == "nt" else "/media/nas"
+    original = f"""
 server:
   host: 0.0.0.0
 media_libraries:
-  - {id: lib-nas, name: NAS, path: /media/nas}
+  - {{id: lib-nas, name: NAS, path: {library}}}
 scan:
   enabled: true
   manual_scan_enabled: true
@@ -71,10 +73,10 @@ wake_on_lan:
 translation:
   model: model-1
   upstreams:
-    - {name: primary, base_url: http://primary/v1, api_key_env: NODE_KEY}
+    - {{name: primary, base_url: http://primary/v1, api_key_env: NODE_KEY}}
   fallback_model: model-2
   fallback_upstreams:
-    - {name: backup, base_url: http://backup/v1, api_key_env: BACKUP_KEY}
+    - {{name: backup, base_url: http://backup/v1, api_key_env: BACKUP_KEY}}
 """.lstrip()
     path.write_text(original, encoding="utf-8")
     monkeypatch.setenv("NODE_KEY", "primary-token")

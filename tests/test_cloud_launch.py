@@ -2,7 +2,9 @@ import asyncio
 import importlib.util
 import io
 import json
+import os
 import tarfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
@@ -304,7 +306,9 @@ async def fake_identifier(ssh, log) -> str:
 
 async def _finish(launcher: CloudLauncher, launch_id: str, after_grab=None) -> None:
     launcher.start(launch_id)
-    for _ in range(500):
+    # 按时间等而不是按次数：Windows 上 sleep(0.01) 实际约 15 毫秒。
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
         await asyncio.sleep(0.01)
         launch = launcher.database.get_cloud_launch(launch_id, with_log=False)
         if launch["state"] == "booting" and after_grab:
@@ -903,7 +907,8 @@ async def test_deploy_worker_over_ssh(tmp_path: Path) -> None:
         assert (tmp_path / ".video-turbo-bundle.tar.gz").read_bytes() == b"bundle-bytes"
         settings_file = tmp_path / ".video-turbo-deploy.json"
         assert json.loads(settings_file.read_text())["worker_token"] == "tok"
-        assert settings_file.stat().st_mode & 0o777 == 0o600
+        if os.name != "nt":  # Windows 没有 Unix 权限位
+            assert settings_file.stat().st_mode & 0o777 == 0o600
         assert "PROFILE=5090" in scripts[0] and "VERSION=v9" in scripts[0]
         assert "tok" not in scripts[0]  # 密钥只经 SFTP 传递
         assert "[安装] 完成" in render(lines)
@@ -932,6 +937,7 @@ async def test_deploy_worker_over_ssh(tmp_path: Path) -> None:
         await server.wait_closed()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="部署脚本在 Linux 云主机上运行")
 def test_deploy_script_runs_in_bash(tmp_path: Path) -> None:
     import subprocess
 

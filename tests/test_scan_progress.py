@@ -13,6 +13,7 @@ from video_turbo.media import output_subtitle_path
 from video_turbo.media_sources.local import LocalSource
 from video_turbo.models import Cue, JobState, SourceKind
 from video_turbo.orchestrator.processor import Orchestrator
+from video_turbo.source_paths import text as path_text
 
 
 def test_scan_publishes_live_result_object(tmp_path: Path, monkeypatch) -> None:
@@ -475,7 +476,7 @@ def test_existing_subtitle_retranslation_replaces_its_own_subtitle(
     assert render(checkpoint_path.read_text(encoding="utf-8")) == "旧翻译检查点\n"
     queued = database.get_job(job_id)
     assert queued is not None
-    assert queued["target_result_path"] == str(zh_path)
+    assert queued["target_result_path"] == path_text(zh_path)
     assert queued["reprocess_mode"] == "retranslate"
     assert asyncio.run(orchestrator.pause_job(job_id)) is True
     assert render(zh_path.read_text(encoding="utf-8")) == "旧完整翻译\n"

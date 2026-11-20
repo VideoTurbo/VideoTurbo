@@ -233,7 +233,8 @@ class Orchestrator:
         path.parent.mkdir(parents=True, exist_ok=True)
         for target, content in payloads:
             temporary = target.with_suffix(target.suffix + ".tmp")
-            temporary.write_text(content, encoding="utf-8")
+            # 按 GPU 机器回传的原样保存：Windows 上不把换行改成 \r\n。
+            temporary.write_text(content, encoding="utf-8", newline="\n")
             temporary.replace(target)
         if not artifacts:
             for kind in ("pass1", "pass2", "merged"):

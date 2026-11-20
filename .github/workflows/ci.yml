@@ -34,6 +34,10 @@ jobs:
   # 桌面版主程序也跑在 Windows 上：路径写法（盘符、\ 分隔）只有在 Windows 上才测得出来。
   python-windows:
     runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      # 与桌面版一致：外壳以 UTF-8 模式启动主程序，读写文件不受系统代码页影响。
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -44,7 +48,7 @@ jobs:
       - name: 安装依赖
         run: uv sync --locked --python 3.11 --extra orchestrator --extra worker --extra dev
       - name: 单元测试
-        run: uv run pytest -q
+        run: uv run pytest -q -rfE --timeout=120
 
   web:
     runs-on: ubuntu-latest
