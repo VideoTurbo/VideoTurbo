@@ -253,7 +253,9 @@ ICON_MAX_BYTES = ICON_MAX_LENGTH * 3 // 4 - 64
 _ICON_DATA_URI = re.compile(
     r"data:image/(png|jpeg|gif|webp|svg\+xml)(;base64)?,(.*)", re.IGNORECASE | re.DOTALL
 )
-_SVG_START = re.compile(r"\s*(<\?xml[^>]*\?>\s*)?(<!--.*?-->\s*)*<svg[\s>/]", re.DOTALL)
+# 注释用原子组：每段注释匹配到第一个 --> 就固定，不再回溯重新切分。否则 “<!--” 后接大量 “--><!--” 时
+# 回溯次数随长度指数增长，一个几百字节的远程图标就能让主程序卡住。
+_SVG_START = re.compile(r"\s*(?:<\?xml[^>]*\?>\s*)?(?><!--.*?-->\s*)*<svg[\s>/]", re.DOTALL)
 # SVG 中的脚本、事件属性、内嵌 HTML、实体声明和外部引用（只允许 #id 形式的内部引用）。
 _SVG_UNSAFE = re.compile(
     r"<\s*script|<\s*foreignObject|<!\s*(?:ENTITY|DOCTYPE)|\bon[a-z]+\s*=|javascript:|@import"
