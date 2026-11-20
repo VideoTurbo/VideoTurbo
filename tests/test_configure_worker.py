@@ -1,7 +1,9 @@
 import importlib.util
 import io
+import os
 from pathlib import Path
 
+import pytest
 import yaml
 
 from video_turbo.i18n import render
@@ -126,6 +128,7 @@ def test_non_interactive_copies_template_and_reports_missing(tmp_path, monkeypat
     assert "server_url、worker_token" in render(capsys.readouterr().out)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="用例里的绝对路径是 Linux 写法")
 def test_print_download_root_resolves_relative_paths(tmp_path, monkeypatch, capsys):
     config = tmp_path / "config/worker.yaml"
     config.parent.mkdir()

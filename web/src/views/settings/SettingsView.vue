@@ -14,9 +14,8 @@ import { confirm, toast } from '@/lib/feedback'
 import { configSchemas, toConfigPayload, toFormValues, type FormValues } from '@/lib/settings'
 import { loadConfig } from '@/stores/config'
 
-const PORT_TIP = t('settings.portTip')
 import { settingsRequest, type SettingsCategory } from '@/stores/navigation'
-import { refreshStatus } from '@/stores/status'
+import { isDesktop, refreshStatus } from '@/stores/status'
 import AccountSection from './AccountSection.vue'
 import ConfigForm from './ConfigForm.vue'
 import ConnectionsSection from './ConnectionsSection.vue'
@@ -255,9 +254,9 @@ async function save(): Promise<void> {
           <h3>{{ t('settings.nav.system') }}</h3>
           <ConfigForm v-model="form.sections.server" :fields="configSchemas.server" />
           <div v-if="saved" class="readonly-list">
-            <div class="readonly-title">{{ t('settings.deployment') }}</div>
-            <div class="readonly-row"><span>{{ t('settings.port') }}<HelpTip :text="PORT_TIP" /></span><code>{{ saved.deployment.port }}</code></div>
-            <div class="readonly-row"><span>{{ t('settings.workerPort') }}<HelpTip :text="PORT_TIP" /></span><code>{{ saved.deployment.worker_port }}</code></div>
+            <div class="readonly-title">{{ t(isDesktop ? 'settings.deployment.desktop' : 'settings.deployment') }}</div>
+            <div class="readonly-row"><span>{{ t('settings.port') }}<HelpTip :text="t(isDesktop ? 'settings.portTip.desktop' : 'settings.portTip')" /></span><code>{{ saved.deployment.port }}</code></div>
+            <div class="readonly-row"><span>{{ t('settings.workerPort') }}<HelpTip :text="t(isDesktop ? 'settings.portTip.desktop' : 'settings.portTip')" /></span><code>{{ saved.deployment.worker_port }}</code></div>
             <div class="readonly-row"><span>{{ t('settings.backupDir') }}</span><code>{{ saved.deployment.restore_backup_dir || t('settings.backupDirUnset') }}</code></div>
           </div>
           <div class="readonly-list" style="margin-top: 12px">

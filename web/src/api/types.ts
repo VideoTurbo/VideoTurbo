@@ -296,7 +296,7 @@ export type ConfigValues = Record<string, unknown>
 export interface AppConfig {
   llm: { nodes: LlmNode[] }
   settings: Record<ConfigSection, ConfigValues>
-  deployment: { port: number; worker_port: number; restore_backup_dir?: string | null }
+  deployment: { kind?: Deployment; port: number; worker_port: number; restore_backup_dir?: string | null }
   languages: LanguageInfo[]
 }
 
@@ -727,9 +727,13 @@ export interface TranslationStatus {
   fallback_upstreams?: Upstream[]
 }
 
+/** 主控的部署方式：提示文案据此说明设置去哪里改。 */
+export type Deployment = 'docker' | 'desktop' | 'source'
+
 export interface Status {
   /** 主控的 VideoTurbo 版本。 */
   version: string
+  deployment?: Deployment
   last_scan?: ScanInfo | null
   scan_status?: string
   manual_scan_enabled?: boolean

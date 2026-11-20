@@ -10,6 +10,7 @@ import SwitchRow from '@/components/SwitchRow.vue'
 import { toast } from '@/lib/feedback'
 import PluginSettingsDialog from './PluginSettingsDialog.vue'
 import { t } from '@/i18n'
+import { isDesktop } from '@/stores/status'
 
 const props = defineProps<{
   /** 正在编辑的媒体库；null 表示添加。 */
@@ -173,7 +174,7 @@ const title = computed(() => (props.library ? t('settings.library.editTitle', { 
     <div v-if="step === 'source'" class="source-list">
       <button type="button" class="source-option" @click="pickSource(LOCAL)">
         <span class="plugin-icon"><AppIcon name="folder" /></span>
-        <span class="source-option-text"><b>{{ t('settings.library.local') }}</b><span>{{ t('settings.library.localHelp') }}</span></span>
+        <span class="source-option-text"><b>{{ t('settings.library.local') }}</b><span>{{ t(isDesktop ? 'settings.library.localHelp.desktop' : 'settings.library.localHelp') }}</span></span>
         <AppIcon name="chevron" />
       </button>
       <button v-for="source in sources" :key="source.id" type="button" class="source-option" @click="pickPlugin(source)">
@@ -211,7 +212,7 @@ const title = computed(() => (props.library ? t('settings.library.editTitle', { 
         <div v-if="page && !page.folders.length" class="muted key-empty folder-empty">{{ t('settings.library.noSubfolders') }}</div>
       </div>
       <div v-if="page?.current && currentWarning" class="cloud-result bad">{{ currentWarning }}</div>
-      <p class="field-help">{{ t('settings.library.pickHelp') }}<template v-if="form.source === LOCAL">{{ t('settings.library.missingHelp') }}</template></p>
+      <p class="field-help">{{ t('settings.library.pickHelp') }}<template v-if="form.source === LOCAL">{{ t(isDesktop ? 'settings.library.missingHelp.desktop' : 'settings.library.missingHelp') }}</template></p>
     </div>
 
     <!-- 第 3 步：名称和语言（编辑时只有这一步） -->

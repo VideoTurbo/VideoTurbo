@@ -17,6 +17,8 @@ export const refreshedAt = ref('')
 export const heartbeatTimeout = computed(() => status.value?.heartbeat_timeout_seconds || 90)
 export const showPosters = computed(() => status.value?.ui?.show_posters === true)
 export const cloud = computed(() => status.value?.cloud)
+/** 桌面版：设置在托盘菜单里改，提示文案不提 docker-compose.yml。 */
+export const isDesktop = computed(() => status.value?.deployment === 'desktop')
 
 let pending: Promise<Status | null> | null = null
 

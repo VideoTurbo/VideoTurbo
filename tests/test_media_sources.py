@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import PROTOCOL, force_job_state, prepare_server
+from conftest import PROTOCOL, force_job_state, prepare_server, same_path
 from fastapi.testclient import TestClient
 
 from video_turbo.config import AppConfig, MediaLibraryConfig
@@ -20,6 +20,7 @@ from video_turbo.models import Cue, JobState, SourceKind
 from video_turbo.orchestrator.app import app
 from video_turbo.orchestrator.processor import Orchestrator
 from video_turbo.plugins import registry
+from video_turbo.source_paths import text as path_text
 
 TOKEN = "token"
 HEADERS = {**PROTOCOL, "X-Worker-Token": TOKEN}
@@ -121,9 +122,9 @@ def test_library_api_create_edit_delete_and_browse(tmp_path: Path, monkeypatch) 
     prepare_server(tmp_path, monkeypatch)
     with TestClient(app) as client:
         browse = client.get("/api/libraries/browse").json()
-        assert browse["path"] == str(media_root) and browse["parent"] is None
+        assert browse["path"] == same_path(media_root) and browse["parent"] is None
         assert [item["name"] for item in browse["folders"]] == ["movies", "shows"]
-        assert client.get("/api/libraries/browse", params={"path": "/etc"}).status_code == 403
+        assert client.get("/api/libraries/browse", params={"path": str(tmp_path)}).status_code == 403
         assert client.get("/api/libraries/browse", params={"path": f"{media_root}/../.."}).status_code == 403
 
         created = client.post("/api/libraries", json={"name": "电影", "path": str(media_root / "movies")})
@@ -167,7 +168,8 @@ def test_library_api_create_edit_delete_and_browse(tmp_path: Path, monkeypatch) 
         assert renamed.status_code == 200
         library = app.state.config.library(library_id)
         assert render(library.name) == "日本电影" and not library.enabled and library.target_language == "zh-TW"
-        assert library.path == str(media_root / "movies")
+        # 媒体库路径统一用 / 分隔保存（Windows 上是 C:/…）。
+        assert library.path == path_text(media_root / "movies")
 
         # 有进行中的任务时不能删除；删除后影片记录随之清除。
         movie = media_root / "movies" / "a.mkv"
@@ -303,7 +305,7 @@ def test_cloud_library_scans_through_plugin_and_gpu_fetches_media(
         plugin = loader.load(downloaded.text, sha256, "folder-drive")
         reported: list = []
         with plugin(saved_settings, on_state=reported.append) as source:
-            assert source.download("/影视/movie.mkv").url == str(drive / "影视" / "movie.mkv")
+            assert source.download("/影视/movie.mkv").url == same_path(drive / "影视" / "movie.mkv")
         assert reported == [{"downloads": 1}]
         with pytest.raises(loader.PluginLoadError):
             loader.load(DRIVE_SOURCE + "\n", sha256, "folder-drive")

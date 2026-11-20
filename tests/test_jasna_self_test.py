@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,9 @@ from conftest import raises_rendered
 
 from video_turbo.worker.config import JasnaConfig, WorkerConfig
 from video_turbo.worker.jasna import JasnaError, default_self_test_model, self_test
+
+# 影片修复（Jasna）只在 Linux 显卡电脑上运行
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="影片修复（Jasna）只在 Linux 显卡电脑上运行")
 
 FAKE_JASNA = """#!/bin/bash
 if [ "$1" = "--version" ]; then echo "jasna 0.12.3"; exit 0; fi

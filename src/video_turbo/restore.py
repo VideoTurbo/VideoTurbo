@@ -21,6 +21,7 @@ from typing import Any
 
 from .i18n import msg
 from .models import utc_now_iso
+from .source_paths import text as path_text
 
 MARKER_SUFFIX = ".jasna.json"
 UPLOAD_SUFFIX = ".jasna-upload"
@@ -211,7 +212,7 @@ def finalize_restore(
         **marker_payload,
         "original_name": source.name,
         "output_name": output.name,
-        "backup_path": str(backup),
+        "backup_path": path_text(backup),
         "finished_at": utc_now_iso(),
     }
     temporary = marker.with_name(marker.name + ".tmp")
@@ -227,8 +228,8 @@ def finalize_restore(
         except OSError:
             # 文件夹改名失败不影响已发布的影片，保留在原文件夹。
             return result
-        result.folder_renamed_from = str(folder)
-        result.folder_renamed_to = str(folder_target)
+        result.folder_renamed_from = path_text(folder)
+        result.folder_renamed_to = path_text(folder_target)
         result.output_path = folder_target / output.name
         result.marker = folder_target / marker.name
     return result

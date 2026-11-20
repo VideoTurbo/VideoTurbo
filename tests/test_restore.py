@@ -1,12 +1,13 @@
 import asyncio
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import httpx
 import pytest
 import yaml
-from conftest import PROTOCOL, prepare_server, raises_rendered
+from conftest import PROTOCOL, prepare_server, raises_rendered, same_path
 from fastapi.testclient import TestClient
 
 from video_turbo.config import AppConfig, SubtitleConfig
@@ -210,6 +211,7 @@ def test_configure_jasna_updates_existing_block(tmp_path: Path) -> None:
     assert appended["jasna"]["enabled"] is True and appended["jasna"]["ltx"] is False
 
 
+@pytest.mark.skipif(os.name == "nt", reason="影片修复只在 Linux 显卡电脑上运行，锁用 fcntl")
 def test_machine_lock_is_exclusive(tmp_path: Path) -> None:
     first, second = MachineLock(tmp_path), MachineLock(tmp_path)
     assert first.acquire()
@@ -362,7 +364,7 @@ def test_restore_end_to_end_with_resumed_transfers(tmp_path: Path, monkeypatch) 
         assert (new_dir / "ABC-123-U.zh.default.srt").is_file()
         assert (new_dir / "ABC-123-U.jasna.json").is_file()
         assert Path(job["backup_path"]) == backup / "lib" / "ABC-123" / "ABC-123.mp4"
-        assert database.get_media(media_id)["path"] == str(new_dir / "ABC-123-U.mp4")
+        assert database.get_media(media_id)["path"] == same_path(new_dir / "ABC-123-U.mp4")
         media = client.get("/api/restore/media", params={"status": "all"}).json()
         assert {item["media_id"]: item for item in media["items"]}[media_id]["can_restore"] is False
 

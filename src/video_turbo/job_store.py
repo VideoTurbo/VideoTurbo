@@ -22,6 +22,7 @@ from .models import (
     utc_now_iso,
 )
 from .naming import published_subtitle_path
+from .source_paths import text as path_text
 from .store_base import StoreBase
 
 
@@ -71,10 +72,10 @@ class JobStoreMixin(StoreBase):
                     Path(str(row["media_path"])), str(row["target_language"])
                 )
                 if state == JobState.PUBLISHING and self.files.exists(
-                    str(row["library_id"]), str(output)
+                    str(row["library_id"]), path_text(output)
                 ):
                     next_state = JobState.COMPLETED
-                    subtitle_path: str | None = str(output)
+                    subtitle_path: str | None = path_text(output)
                     error = None
                 elif row["source_result_path"] and Path(str(row["source_result_path"])).is_file():
                     next_state = JobState.ASR_COMPLETED
@@ -160,7 +161,7 @@ class JobStoreMixin(StoreBase):
             ):
                 subtitle_path = existing["subtitle_path"]
                 output_missing = not subtitle_path or not self.files.exists(
-                    str(existing["library_id"]), str(subtitle_path)
+                    str(existing["library_id"]), path_text(subtitle_path)
                 )
             # 扫描直接判定的任务没有识别来源，现在可以处理了就重建为待处理。
             scan_placeholder = bool(existing and existing["source_kind"] == SourceKind.NONE)
@@ -266,7 +267,7 @@ class JobStoreMixin(StoreBase):
             ja_candidates = [existing["source_result_path"], reusable_source_result_path]
             source_result_path = next(
                 (
-                    str(candidate)
+                    path_text(candidate)
                     for candidate in ja_candidates
                     if candidate and Path(str(candidate)).is_file()
                 ),
@@ -353,7 +354,7 @@ class JobStoreMixin(StoreBase):
                 return None
             source_result_path = next(
                 (
-                    str(candidate)
+                    path_text(candidate)
                     for candidate in (existing["source_result_path"], reusable_source_result_path)
                     if candidate and Path(str(candidate)).is_file()
                 ),
@@ -414,7 +415,7 @@ class JobStoreMixin(StoreBase):
                 WHERE id = ? AND state IN (?, ?)
                 """,
                 (
-                    str(audio_path), audio_sha256, utc_now_iso(), job_id,
+                    path_text(audio_path), audio_sha256, utc_now_iso(), job_id,
                     JobState.PAUSED, JobState.PENDING,
                 ),
             )
@@ -465,7 +466,7 @@ class JobStoreMixin(StoreBase):
                 return None
             source_result_path = next(
                 (
-                    str(candidate)
+                    path_text(candidate)
                     for candidate in (existing["source_result_path"], reusable_source_result_path)
                     if candidate and Path(str(candidate)).is_file()
                 ),
@@ -488,9 +489,9 @@ class JobStoreMixin(StoreBase):
                 managed_subtitle_candidates.append(expected_subtitle)
             managed_subtitle_path = next(
                 (
-                    str(candidate)
+                    path_text(candidate)
                     for candidate in managed_subtitle_candidates
-                    if candidate and self.files.exists(str(existing["library_id"]), str(candidate))
+                    if candidate and self.files.exists(str(existing["library_id"]), path_text(candidate))
                 ),
                 None,
             )
@@ -706,10 +707,10 @@ class JobStoreMixin(StoreBase):
                 subtitle = published_subtitle_path(
                     Path(str(row["media_path"])), str(row["target_language"])
                 )
-                if not self.files.exists(str(row["library_id"]), str(subtitle)):
+                if not self.files.exists(str(row["library_id"]), path_text(subtitle)):
                     invalid[job_id] = msg("jobs.store.missingSrt", subtitle=subtitle)
                     continue
-                subtitle_paths[job_id] = str(subtitle)
+                subtitle_paths[job_id] = path_text(subtitle)
 
             if invalid:
                 return [], invalid

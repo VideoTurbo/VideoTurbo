@@ -15,6 +15,7 @@ from .models import (
 )
 from .naming import published_subtitle_path, title_key
 from .settings_store import LIBRARY_SCANS_KEY
+from .source_paths import text as path_text
 from .store_base import StoreBase
 
 
@@ -53,7 +54,7 @@ class MediaStoreMixin(StoreBase):
                     poster_media_path = ?, poster_checked_at = ?
                 WHERE id = ?
                 """,
-                (str(poster) if poster else None, size, mtime_ns, media_path, utc_now_iso(), media_id),
+                (path_text(poster) if poster else None, size, mtime_ns, media_path, utc_now_iso(), media_id),
             )
 
     def cached_probe(
@@ -66,7 +67,7 @@ class MediaStoreMixin(StoreBase):
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT size, mtime_ns, probe_json FROM media_items WHERE library_id = ? AND path = ?",
-                (library_id, str(path)),
+                (library_id, path_text(path)),
             ).fetchone()
         if row is None or row["size"] != size or row["mtime_ns"] != mtime_ns:
             return None
@@ -99,7 +100,7 @@ class MediaStoreMixin(StoreBase):
             relocated = False
             existing = conn.execute(
                 "SELECT id, path, size, mtime_ns FROM media_items WHERE library_id = ? AND path = ?",
-                (library_id, str(path)),
+                (library_id, path_text(path)),
             ).fetchone()
             if existing is None and file_key is not None:
                 # 改名或移动文件时文件标识保持不变（本地是设备号和 inode）。
@@ -135,7 +136,7 @@ class MediaStoreMixin(StoreBase):
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        str(path),
+                        path_text(path),
                         library_id,
                         size,
                         mtime_ns,
@@ -162,7 +163,7 @@ class MediaStoreMixin(StoreBase):
                 WHERE id = ?
                 """,
                 (
-                    str(path),
+                    path_text(path),
                     library_id,
                     size,
                     mtime_ns,
@@ -187,14 +188,14 @@ class MediaStoreMixin(StoreBase):
                     else None
                 )
                 if relocated_subtitle is not None and self.files.exists(
-                    library_id, str(relocated_subtitle)
+                    library_id, path_text(relocated_subtitle)
                 ):
                     conn.execute(
                         """
                         UPDATE jobs SET subtitle_path = ?, updated_at = ?
                         WHERE media_id = ?
                         """,
-                        (str(relocated_subtitle), now, existing["id"]),
+                        (path_text(relocated_subtitle), now, existing["id"]),
                     )
             return int(existing["id"]), changed
 
@@ -221,7 +222,7 @@ class MediaStoreMixin(StoreBase):
                 key = title_key(path.stem)
                 if int(row["id"]) in present_ids:
                     present.setdefault(key, []).append(row)
-                elif not self.files.exists(library_id, str(path)):
+                elif not self.files.exists(library_id, path_text(path)):
                     missing.setdefault(key, []).append(row)
             for key, old_rows in missing.items():
                 new_rows = present.get(key, [])
@@ -320,33 +321,33 @@ class MediaStoreMixin(StoreBase):
         language = str(job["target_language"])
         target = published_subtitle_path(new_video, language)
         renamed: str | None = None
-        if not self.files.exists(library_id, str(target)):
+        if not self.files.exists(library_id, path_text(target)):
             old_name = published_subtitle_path(old_video, language).name
             candidates = [
                 job["subtitle_path"],
-                str(published_subtitle_path(old_video, language)),
+                path_text(published_subtitle_path(old_video, language)),
                 # 文件夹改名后，旧字幕跟着进了新文件夹，但仍是旧片名。
-                str(new_video.with_name(old_name)),
+                path_text(new_video.with_name(old_name)),
             ]
             source = next(
                 (
                     Path(str(candidate))
                     for candidate in candidates
-                    if candidate and self.files.exists(library_id, str(candidate))
+                    if candidate and self.files.exists(library_id, path_text(candidate))
                 ),
                 None,
             )
             if source is None:
                 return None
             try:
-                self.files.rename(library_id, str(source), str(target))
+                self.files.rename(library_id, path_text(source), path_text(target))
             except OSError:
                 return None
-            renamed = str(source)
+            renamed = path_text(source)
         with self.connect() as conn:
             conn.execute(
                 "UPDATE jobs SET subtitle_path = ?, updated_at = ? WHERE id = ?",
-                (str(target), utc_now_iso(), job_id),
+                (path_text(target), utc_now_iso(), job_id),
             )
         return renamed
 

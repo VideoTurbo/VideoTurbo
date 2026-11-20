@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 import shutil
 import signal
 import subprocess
@@ -313,6 +314,7 @@ def test_native_aria2_download_and_resume(module, tmp_path, server, initial):
 
 
 @pytest.mark.skipif(not shutil.which("aria2c"), reason="需要 aria2c 做真实分段续传测试")
+@pytest.mark.skipif(os.name == "nt", reason="影片修复只在 Linux 上运行，测试要发送 SIGINT")
 def test_native_aria2_segment_resume_across_sources(module, tmp_path, server, monkeypatch):
     # 足够大才会触发 --min-split-size=8M；小文件测试不能验证分段断点。
     monkeypatch.setattr(sys.modules[__name__], "DATA", DATA * 200)

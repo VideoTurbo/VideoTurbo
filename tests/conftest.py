@@ -1,4 +1,8 @@
+import asyncio
+import os
 import re
+import sys
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,6 +20,46 @@ from video_turbo.settings_store import WORKER_TOKEN_KEY
 
 # GPU 机器每个请求都带的协议版本请求头。
 PROTOCOL = {PROTOCOL_HEADER: str(WORKER_PROTOCOL_VERSION)}
+
+
+@pytest.fixture(autouse=True)
+def _dump_stuck_tasks(request: pytest.FixtureRequest) -> Iterator[None]:
+    """排查卡住的测试：设置 VIDEO_TURBO_TEST_DUMP_AFTER（秒）后，测试超过这个时间仍未结束时，
+    打印所有未完成的 asyncio 任务停在哪里。pytest-timeout 只能打印线程栈，看不到协程在等什么。"""
+    seconds = float(os.environ.get("VIDEO_TURBO_TEST_DUMP_AFTER") or 0)
+    if seconds <= 0:
+        yield
+        return
+
+    capture = request.config.pluginmanager.getplugin("capturemanager")
+
+    def dump() -> None:
+        # 暂停 pytest 的输出捕获，否则超时退出时这些内容随捕获一起丢掉。
+        with capture.global_and_fixture_disabled():
+            out = sys.stderr
+            print(f"\n=== {request.node.nodeid} 超过 {seconds:g} 秒，未完成的 asyncio 任务：", file=out)
+            for task in list(asyncio.tasks._all_tasks):  # 调试用：取所有事件循环里的任务
+                if task.done():
+                    continue
+                print(f"--- {task.get_name()}", file=out)
+                # 沿 await 链往里走，直到真正在等的那个对象（print_stack 只给出最外层）。
+                awaited: Any = task.get_coro()
+                while awaited is not None:
+                    frame = getattr(awaited, "cr_frame", None) or getattr(awaited, "gi_frame", None)
+                    if frame is None:
+                        print(f"    等待 {awaited!r}", file=out)
+                        break
+                    print(f"    {frame.f_code.co_filename}:{frame.f_lineno} {frame.f_code.co_name}", file=out)
+                    awaited = getattr(awaited, "cr_await", None) or getattr(awaited, "gi_yieldfrom", None)
+            out.flush()
+
+    timer = threading.Timer(seconds, dump)
+    timer.daemon = True
+    timer.start()
+    try:
+        yield
+    finally:
+        timer.cancel()
 
 
 @pytest.fixture(autouse=True)
@@ -69,3 +113,19 @@ def raises_rendered(exc_type: type[BaseException], pattern: str) -> Iterator[pyt
         yield info
     text = render(str(info.value))
     assert re.search(pattern, text), text
+
+
+class same_path:
+    """与数据库里的路径比较时用：Windows 上路径可能用 / 或 \\ 分隔，按指向的位置比较。
+
+    ``assert job["audio_path"] == same_path(audio)``
+    """
+
+    def __init__(self, expected: Any) -> None:
+        self.expected = Path(expected)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, (str, Path)) and Path(other) == self.expected
+
+    def __repr__(self) -> str:
+        return f"same_path({str(self.expected)!r})"

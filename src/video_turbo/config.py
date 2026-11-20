@@ -5,9 +5,9 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
-from . import languages
+from . import languages, source_paths
 from .environment import getenv
 from .i18n import msg
 from .models import AsrSettings
@@ -21,6 +21,8 @@ class ServerConfig(ConfigBase):
     """监听地址和端口与容器部署绑定，来自环境变量（见 deployment_settings）；只有日志级别在控制台修改。"""
 
     host: str = "0.0.0.0"
+    # Worker 专用端口的监听地址；留空时与 host 相同。桌面版让控制台只听本机、接入端口对局域网开放。
+    worker_host: str = ""
     # 主端口：控制台和全部接口。
     port: int = Field(default=8765, ge=1, le=65535)
     # Worker 专用端口：只提供 Worker 接口，供端口转发映射到公网。
@@ -36,6 +38,10 @@ class ServerConfig(ConfigBase):
             raise ValueError(msg("config.portClash"))
         return self
 
+    @property
+    def worker_listen_host(self) -> str:
+        return self.worker_host or self.host
+
 
 LOCAL_SOURCE = "local"
 LIBRARY_ID_PATTERN = r"^[a-z0-9][a-z0-9-]{0,39}$"
@@ -47,7 +53,7 @@ class MediaLibraryConfig(ConfigBase):
     name: str = Field(min_length=1, max_length=60)
     # 来源："local" 是主程序容器内的文件夹；其余是网盘插件（媒体库来源插件）的 id。
     source: str = Field(default=LOCAL_SOURCE, min_length=1, max_length=64)
-    # 来源内的绝对路径（/ 分隔）。本地来源是容器内路径。
+    # 来源内的绝对路径（/ 分隔，见 source_paths）。本地来源在 Docker 里是容器内路径。
     path: str
     enabled: bool = True
     # 语言代码来自内置语言表（languages.py）；扫描时按这对语言判断和创建任务。
@@ -64,14 +70,9 @@ class MediaLibraryConfig(ConfigBase):
 
     @field_validator("path", mode="before")
     @classmethod
-    def normalize_path(cls, value: object) -> str:
-        text = str(value or "").strip().replace("\\", "/")
-        if not text.startswith("/"):
-            raise ValueError(msg("config.libraryPathAbsolute", text=text))
-        parts = [part for part in text.split("/") if part]
-        if any(part in {".", ".."} for part in parts):
-            raise ValueError(msg("config.libraryPathDots", text=text))
-        return "/" + "/".join(parts)
+    def normalize_path(cls, value: object, info: ValidationInfo) -> str:
+        # source 先于 path 校验：Windows 上的本地文件夹用盘符写法，其余以 / 开头。
+        return source_paths.normalize(value, local=info.data.get("source", LOCAL_SOURCE) == LOCAL_SOURCE)
 
     @model_validator(mode="after")
     def validate_languages(self) -> MediaLibraryConfig:
@@ -92,8 +93,7 @@ class MediaLibraryConfig(ConfigBase):
 
 def paths_overlap(first: str, second: str) -> bool:
     """两个来源内路径是否相同或互相包含。"""
-    a, b = first.rstrip("/") + "/", second.rstrip("/") + "/"
-    return a.startswith(b) or b.startswith(a)
+    return source_paths.overlap(first, second)
 
 
 class ScanConfig(ConfigBase):
@@ -565,6 +565,7 @@ def deployment_settings() -> dict:
     return {
         "server": {
             "host": "127.0.0.1" if local_preview else getenv("VIDEO_TURBO_HOST", "0.0.0.0"),
+            "worker_host": "127.0.0.1" if local_preview else (getenv("VIDEO_TURBO_WORKER_HOST", "") or "").strip(),
             "port": int(getenv("VIDEO_TURBO_PORT", "8765")),
             "worker_port": int(getenv("VIDEO_TURBO_WORKER_PORT", "8766")),
             "trusted_proxies": (getenv("VIDEO_TURBO_TRUSTED_PROXIES", "") or "").strip(),
@@ -580,5 +581,6 @@ def apply_local_preview(config: AppConfig) -> None:
         # 本地只预览控制台和测试节点：在内存里关闭扫描等副作用，不写回任何配置。
         # 媒体库照常显示，但不会被扫描。媒体服务器刷新和通知推送由应用启动时按同一环境变量关闭。
         config.server.host = "127.0.0.1"
+        config.server.worker_host = "127.0.0.1"
         config.scan.enabled = False
         config.scan.manual_scan_enabled = False

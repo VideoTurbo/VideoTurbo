@@ -15,9 +15,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from .. import languages
+from .. import languages, source_paths
 from ..config import LOCAL_SOURCE, AppConfig
 from ..config_store import ConfigError, ConfigStore
+from ..deployment import is_desktop
 from ..i18n import msg
 from ..media_sources.base import MediaSource
 from ..plugins.base import describe_error, icon_uri
@@ -27,7 +28,8 @@ from .sources import LOCAL_LABEL, MediaSources, SourceUnavailable
 
 router = APIRouter()
 
-# 本地来源可以浏览的根目录（容器内路径）：只在这些目录里选媒体库，不暴露容器的其他文件。
+# 本地来源可以浏览的根目录：只在这些目录里选媒体库，不暴露主程序所在机器的其他文件。
+# Docker 里是容器内的 /media；Windows 上未设置时是本机全部盘符。桌面版由外壳设置 VIDEO_TURBO_MEDIA_ROOTS。
 DEFAULT_MEDIA_ROOTS = ("/media",)
 
 
@@ -52,13 +54,43 @@ def _store(request: Request) -> ConfigStore:
 
 
 def media_roots() -> list[str]:
-    configured = os.getenv("VIDEO_TURBO_MEDIA_ROOTS") or ":".join(DEFAULT_MEDIA_ROOTS)
-    roots = [posixpath.normpath(item.strip()) for item in configured.split(":") if item.strip()]
-    return list(dict.fromkeys(root for root in roots if root.startswith("/")))
+    """VIDEO_TURBO_MEDIA_ROOTS 按系统的路径分隔符（Linux / macOS 是 :，Windows 是 ;）分开。"""
+    configured = os.getenv("VIDEO_TURBO_MEDIA_ROOTS")
+    if configured:
+        items = configured.split(os.pathsep)
+    elif source_paths.WINDOWS:
+        items = source_paths.windows_drives()
+    else:
+        items = list(DEFAULT_MEDIA_ROOTS)
+    roots: list[str] = []
+    for item in items:
+        if not item.strip():
+            continue
+        try:
+            roots.append(source_paths.normalize(item, local=True))
+        except ValueError:
+            continue
+    return list(dict.fromkeys(roots))
 
 
 def _inside_roots(path: str, roots: list[str]) -> bool:
-    return any(path == root or path.startswith(root.rstrip("/") + "/") for root in roots)
+    return any(path == root or source_paths.contains(root, path) for root in roots)
+
+
+def _request_path(source_id: str, value: str) -> str:
+    """请求里的文件夹路径换成来源内的写法。Linux / macOS 与网盘允许省略开头的 /。
+
+    先按字面消去 . 和 ..：越出媒体目录的路径随后按"不在媒体目录里"拒绝。
+    """
+    local = source_id == LOCAL_SOURCE
+    value = value.strip().replace("\\", "/")
+    if not (local and source_paths.WINDOWS):
+        value = "/" + value.lstrip("/")
+    value = posixpath.normpath(value)
+    try:
+        return source_paths.normalize(value, local=local)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def _source_info(sources: MediaSources, source_id: str) -> dict[str, Any]:
@@ -150,7 +182,7 @@ def _check_folder(sources: MediaSources, source_id: str, path: str) -> None:
         raise HTTPException(status_code=422, detail=msg("api.libraries.readFailed", error=describe_error(exc))) from exc
     if entry is None or not entry.is_dir:
         detail = (
-            msg("api.libraries.localNotFound", path=path)
+            msg("api.libraries.localNotFound.desktop" if is_desktop() else "api.libraries.localNotFound", path=path)
             if source_id == LOCAL_SOURCE
             else msg("api.libraries.driveNotFound", path=path)
         )
@@ -161,7 +193,7 @@ def _check_folder(sources: MediaSources, source_id: str, path: str) -> None:
 async def create_library(request: Request, payload: LibraryCreate) -> dict:
     _check_languages(payload)
     sources = _sources(request)
-    path = posixpath.normpath("/" + payload.path.strip().replace("\\", "/").lstrip("/"))
+    path = _request_path(payload.source, payload.path)
     await asyncio.to_thread(_check_folder, sources, payload.source, path)
     library_id = f"lib-{uuid.uuid4().hex[:8]}"
     libraries = _saved_libraries(request)
@@ -214,7 +246,7 @@ def _browse(sources: MediaSources, config: AppConfig, source_id: str, path: str 
                 "current": None,
                 "folders": [_folder(root, used) for root in roots],
             }
-    path = posixpath.normpath("/" + path.replace("\\", "/").lstrip("/"))
+    path = _request_path(source_id, path)
     if source_id == LOCAL_SOURCE and not _inside_roots(path, roots):
         raise HTTPException(status_code=403, detail=msg("api.libraries.browseRoots"))
     try:
@@ -229,7 +261,7 @@ def _browse(sources: MediaSources, config: AppConfig, source_id: str, path: str 
     if path in roots:
         parent = None if len(roots) == 1 else ""
     else:
-        parent = posixpath.dirname(path)
+        parent = source_paths.parent(path, local=source_id == LOCAL_SOURCE)
     root = next((item for item in roots if _inside_roots(path, [item])), "/")
     return {
         "path": path,
@@ -263,7 +295,7 @@ def _folder(path: str, used: list[Any]) -> dict[str, Any]:
 
 
 def _contains(parent: str, child: str) -> bool:
-    return child.startswith(parent.rstrip("/") + "/")
+    return source_paths.contains(parent, child)
 
 
 @router.get("/api/libraries/browse")

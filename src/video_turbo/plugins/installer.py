@@ -50,6 +50,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from ..database import Database
+from ..deployment import is_desktop
 from ..i18n import localized, msg
 from ..models import utc_now_iso
 from ..plugin_store import CONNECTION_KEYS
@@ -111,7 +112,10 @@ def safe_mode() -> bool:
 def _require_normal_mode() -> None:
     if safe_mode():
         raise PluginError(
-            msg("plugins.install.safeMode", SAFE_MODE_ENV=SAFE_MODE_ENV),
+            msg(
+                "plugins.install.safeMode.desktop" if is_desktop() else "plugins.install.safeMode",
+                SAFE_MODE_ENV=SAFE_MODE_ENV,
+            ),
             conflict=True,
         )
 

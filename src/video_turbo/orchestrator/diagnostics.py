@@ -22,6 +22,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from .. import __version__
+from ..deployment import deployment
 from ..environment import getenv
 from ..i18n import LocalizedFormatter
 from ..migrations import SCHEMA_VERSION, schema_version
@@ -124,7 +125,7 @@ def collect(app: Any) -> dict[str, Any]:
             "python": sys.version.split()[0],
             "platform": platform.platform(),
             "machine": platform.machine(),
-            "in_container": getenv("VIDEO_TURBO_BUNDLE_ROOT") is not None,
+            "deployment": deployment(),
             "local_preview": getenv("VIDEO_TURBO_LOCAL_PREVIEW") == "1",
             "plugin_safe_mode": plugin_installer.safe_mode(),
         },

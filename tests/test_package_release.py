@@ -38,6 +38,7 @@ def write(root, name, content):
     return path
 
 
+@pytest.mark.skipif(os.name == "nt", reason="发布包在 Linux 上制作，要检查脚本的可执行权限")
 def test_package_includes_deployment_sources_without_local_secrets(project, tmp_path, packager):
     safe_files = {
         "src/video_turbo/worker/main.py": b"# source including uncommitted changes\n",
@@ -162,6 +163,7 @@ def test_refuses_symlinked_source_and_output(project, tmp_path, packager):
         packager.build_release(project, output)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="发布包在 Linux 上制作，要检查脚本的可执行权限")
 def test_archives_wrap_release_in_single_top_level_folder(project, tmp_path, packager):
     launcher = write(project, "deploy/worker/linux/worker.sh", b"#!/bin/sh\necho test\n")
     launcher.chmod(0o755)

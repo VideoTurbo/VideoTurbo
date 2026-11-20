@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -213,7 +214,9 @@ def _bind(db: Database, instance_id: str = "i-1") -> None:
 
 
 async def _until(predicate) -> None:
-    for _ in range(300):
+    # 按时间等而不是按次数：Windows 上 sleep(0.01) 实际约 15 毫秒。
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
         if predicate():
             return
         await asyncio.sleep(0.01)
