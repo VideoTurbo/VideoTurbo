@@ -123,7 +123,7 @@ def test_library_api_create_edit_delete_and_browse(tmp_path: Path, monkeypatch) 
         browse = client.get("/api/libraries/browse").json()
         assert browse["path"] == same_path(media_root) and browse["parent"] is None
         assert [item["name"] for item in browse["folders"]] == ["movies", "shows"]
-        assert client.get("/api/libraries/browse", params={"path": "/etc"}).status_code == 403
+        assert client.get("/api/libraries/browse", params={"path": str(tmp_path)}).status_code == 403
         assert client.get("/api/libraries/browse", params={"path": f"{media_root}/../.."}).status_code == 403
 
         created = client.post("/api/libraries", json={"name": "电影", "path": str(media_root / "movies")})
@@ -303,7 +303,7 @@ def test_cloud_library_scans_through_plugin_and_gpu_fetches_media(
         plugin = loader.load(downloaded.text, sha256, "folder-drive")
         reported: list = []
         with plugin(saved_settings, on_state=reported.append) as source:
-            assert source.download("/影视/movie.mkv").url == str(drive / "影视" / "movie.mkv")
+            assert source.download("/影视/movie.mkv").url == same_path(drive / "影视" / "movie.mkv")
         assert reported == [{"downloads": 1}]
         with pytest.raises(loader.PluginLoadError):
             loader.load(DRIVE_SOURCE + "\n", sha256, "folder-drive")

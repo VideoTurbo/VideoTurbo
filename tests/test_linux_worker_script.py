@@ -27,8 +27,12 @@ def wait_for(predicate, seconds: float = 5) -> None:
     assert predicate()
 
 
+# 测的是 Linux 显卡电脑的安装脚本。
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="测的是 Linux 显卡电脑的安装脚本")
+
 FAKE_VENV_PYTHON = '''import json, os, signal, sys, time
 from pathlib import Path
+
 root = Path(__file__).parent
 args = sys.argv[1:]
 if args and args[0] in ("-c", "-"):

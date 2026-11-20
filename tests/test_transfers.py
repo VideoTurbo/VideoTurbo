@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -204,6 +205,7 @@ def fast_retries(monkeypatch):
     monkeypatch.setattr(restore_task.asyncio, "sleep", no_wait)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="影片修复只在 Linux 显卡电脑上运行，分段写入用 os.pwrite")
 def test_parallel_download_resumes_and_retries(tmp_path: Path, fast_retries) -> None:
     source = bytes(range(256)) * 12_000  # 约 3 MB，12 个 256 KB 分块
     server = FakeServer(source)

@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import httpx
@@ -210,6 +211,7 @@ def test_configure_jasna_updates_existing_block(tmp_path: Path) -> None:
     assert appended["jasna"]["enabled"] is True and appended["jasna"]["ltx"] is False
 
 
+@pytest.mark.skipif(os.name == "nt", reason="影片修复只在 Linux 显卡电脑上运行，锁用 fcntl")
 def test_machine_lock_is_exclusive(tmp_path: Path) -> None:
     first, second = MachineLock(tmp_path), MachineLock(tmp_path)
     assert first.acquire()

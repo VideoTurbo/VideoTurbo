@@ -1,8 +1,10 @@
 import asyncio
+import os
 import time
 from pathlib import Path
 
 import httpx
+import pytest
 from conftest import PROTOCOL, prepare_server
 from fastapi.testclient import TestClient
 
@@ -12,6 +14,9 @@ from video_turbo.orchestrator.app import app
 from video_turbo.worker import restore_pipeline, restore_task
 from video_turbo.worker.config import JasnaConfig, WorkerConfig
 from video_turbo.worker.restore_pipeline import RestorePipeline
+
+# 影片修复只在 Linux 显卡电脑上运行
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="影片修复只在 Linux 显卡电脑上运行")
 
 HEADERS = {**PROTOCOL, "X-Worker-Token": "token"}
 

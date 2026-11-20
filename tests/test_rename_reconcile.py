@@ -179,5 +179,5 @@ def test_ambiguous_rename_candidates_are_left_alone(tmp_path: Path, monkeypatch)
 
     assert result["relocated"] == 0
     paths = [row["path"] for row in _media_rows(database)]
-    assert str(old_video) in paths
+    assert same_path(old_video) in paths
     assert len(paths) == 3

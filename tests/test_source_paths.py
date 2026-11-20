@@ -68,6 +68,7 @@ def test_text_always_uses_forward_slashes() -> None:
 
 def test_media_roots_use_the_platform_path_separator(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(libraries_api.os, "pathsep", ";")
+    monkeypatch.setattr(source_paths, "WINDOWS", False)
     monkeypatch.setenv("VIDEO_TURBO_MEDIA_ROOTS", "/Volumes;/Users/me/;;relative")
     assert libraries_api.media_roots() == ["/Volumes", "/Users/me"]
 

@@ -13,6 +13,7 @@ from video_turbo.media import output_subtitle_path
 from video_turbo.media_sources.local import LocalSource
 from video_turbo.models import Cue, JobState, SourceKind
 from video_turbo.orchestrator.processor import Orchestrator
+from video_turbo.source_paths import text as path_text
 
 
 def test_scan_publishes_live_result_object(tmp_path: Path, monkeypatch) -> None:
@@ -119,7 +120,7 @@ def _scan_fixture(tmp_path: Path, monkeypatch) -> tuple[Path, Database, Orchestr
 def _media_row(database: Database, video: Path):
     with database.connect() as conn:
         return conn.execute(
-            "SELECT duration, probe_json FROM media_items WHERE path = ?", (str(video),)
+            "SELECT duration, probe_json FROM media_items WHERE path = ?", (path_text(video),)
         ).fetchone()
 
 
