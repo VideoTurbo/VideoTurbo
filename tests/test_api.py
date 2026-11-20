@@ -4,7 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from conftest import PROTOCOL, force_job_state, prepare_server
+from conftest import PROTOCOL, force_job_state, prepare_server, same_path
 from fastapi.testclient import TestClient
 
 from video_turbo import __version__
@@ -14,7 +14,6 @@ from video_turbo.languages import LanguagePair
 from video_turbo.llm_config import LlmNode, LlmSettings
 from video_turbo.models import JobState, SourceKind
 from video_turbo.orchestrator.app import app
-from video_turbo.source_paths import text as path_text
 
 
 def test_manual_scan_selects_only_enabled_libraries(tmp_path: Path, monkeypatch) -> None:
@@ -396,8 +395,8 @@ def test_existing_srt_can_mark_job_completed_and_batch_is_all_or_nothing(
         assert completed.status_code == 200
         assert completed.json()["succeeded"] == [first_id, second_id]
         assert completed.json()["failed"] == []
-        assert app.state.database.get_job(first_id)["subtitle_path"] == path_text(first_subtitle)
-        assert app.state.database.get_job(second_id)["subtitle_path"] == path_text(second_subtitle)
+        assert app.state.database.get_job(first_id)["subtitle_path"] == same_path(first_subtitle)
+        assert app.state.database.get_job(second_id)["subtitle_path"] == same_path(second_subtitle)
 
         repeated = client.post(f"/api/jobs/{first_id}/complete")
         assert repeated.status_code == 409

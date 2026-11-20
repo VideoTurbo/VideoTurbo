@@ -2,13 +2,13 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from conftest import same_path
 
 from video_turbo.config import AppConfig, MediaLibraryConfig
 from video_turbo.database import Database
 from video_turbo.models import JobState, SourceKind
 from video_turbo.naming import title_key
 from video_turbo.orchestrator.processor import Orchestrator
-from video_turbo.source_paths import text as path_text
 
 
 @pytest.mark.parametrize(
@@ -101,12 +101,12 @@ def test_externally_restored_and_renamed_movie_keeps_original_record(
     assert result["relocated"] == 1
     (media,) = _media_rows(database)
     assert media["id"] == old["id"]
-    assert media["path"] == path_text(new_video)
+    assert media["path"] == same_path(new_video)
     assert media["size"] == new_video.stat().st_size
     (job,) = _jobs(database)
     assert job["id"] == job_id
     assert job["state"] == JobState.COMPLETED
-    assert job["subtitle_path"] == path_text(new_folder / "ABC-123-U.zh.default.srt")
+    assert job["subtitle_path"] == same_path(new_folder / "ABC-123-U.zh.default.srt")
     assert (new_folder / "ABC-123-U.zh.default.srt").read_text(encoding="utf-8") == "字幕"
     assert not (new_folder / "ABC-123.zh.default.srt").exists()
     with database.connect() as conn:
@@ -136,7 +136,7 @@ def test_scan_merges_duplicate_record_left_by_earlier_scan(tmp_path: Path, monke
     assert result["relocated"] == 1
     (media,) = _media_rows(database)
     assert media["id"] == old_id
-    assert media["path"] == path_text(new_video)
+    assert media["path"] == same_path(new_video)
     # -UC 属于硬字幕：扫描直接记为已完成，合并后只留一条任务。
     assert media["decision"] == "done"
     (job,) = _jobs(database)

@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import PROTOCOL, force_job_state, prepare_server
+from conftest import PROTOCOL, force_job_state, prepare_server, same_path
 from fastapi.testclient import TestClient
 
 from video_turbo.config import AppConfig, MediaLibraryConfig
@@ -20,7 +20,6 @@ from video_turbo.models import Cue, JobState, SourceKind
 from video_turbo.orchestrator.app import app
 from video_turbo.orchestrator.processor import Orchestrator
 from video_turbo.plugins import registry
-from video_turbo.source_paths import text as path_text
 
 TOKEN = "token"
 HEADERS = {**PROTOCOL, "X-Worker-Token": TOKEN}
@@ -122,7 +121,7 @@ def test_library_api_create_edit_delete_and_browse(tmp_path: Path, monkeypatch) 
     prepare_server(tmp_path, monkeypatch)
     with TestClient(app) as client:
         browse = client.get("/api/libraries/browse").json()
-        assert browse["path"] == path_text(media_root) and browse["parent"] is None
+        assert browse["path"] == same_path(media_root) and browse["parent"] is None
         assert [item["name"] for item in browse["folders"]] == ["movies", "shows"]
         assert client.get("/api/libraries/browse", params={"path": "/etc"}).status_code == 403
         assert client.get("/api/libraries/browse", params={"path": f"{media_root}/../.."}).status_code == 403

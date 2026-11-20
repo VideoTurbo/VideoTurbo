@@ -48,7 +48,8 @@ jobs:
       - name: 安装依赖
         run: uv sync --locked --python 3.11 --extra orchestrator --extra worker --extra dev
       - name: 单元测试
-        run: uv run pytest -q -rfE --timeout=120
+        # -v：每个测试开始时先打印名字，卡住超时时能看出是哪一个。
+        run: uv run pytest -v -rfE --timeout=120
 
   web:
     runs-on: ubuntu-latest

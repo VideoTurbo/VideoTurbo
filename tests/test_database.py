@@ -4,14 +4,13 @@ import threading
 from pathlib import Path
 
 import pytest
-from conftest import force_job_state
+from conftest import force_job_state, same_path
 
 from video_turbo.database import Database
 from video_turbo.i18n import render
 from video_turbo.languages import LanguagePair
 from video_turbo.list_status import SKIPPED_NOTE
 from video_turbo.models import AsrSettings, JobState, SourceKind, WorkerRegistration
-from video_turbo.source_paths import text as path_text
 
 
 @pytest.mark.parametrize(
@@ -101,11 +100,11 @@ def test_media_rename_preserves_job_and_intermediate_results(tmp_path: Path) -> 
     assert renamed_changed is False
     job = database.get_job(job_id)
     assert job is not None
-    assert job["media_path"] == path_text(renamed_movie)
+    assert job["media_path"] == same_path(renamed_movie)
     assert job["state"] == JobState.WAITING_ASR
-    assert job["audio_path"] == path_text(audio)
-    assert job["source_result_path"] == path_text(ja_result)
-    assert job["subtitle_path"] == path_text(renamed_subtitle)
+    assert job["audio_path"] == same_path(audio)
+    assert job["source_result_path"] == same_path(ja_result)
+    assert job["subtitle_path"] == same_path(renamed_subtitle)
     with database.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM media_items").fetchone()[0] == 1
 
@@ -362,7 +361,7 @@ def test_complete_jobs_with_existing_subtitles_is_atomic(tmp_path: Path) -> None
     for job_id, subtitle in zip(job_ids, subtitles, strict=True):
         completed = database.get_job(job_id)
         assert completed["state"] == JobState.COMPLETED
-        assert completed["subtitle_path"] == path_text(subtitle)
+        assert completed["subtitle_path"] == same_path(subtitle)
         # 晚到的后台阶段结果不能把人工确认完成的任务改回处理中。
         assert database.set_job_state(job_id, JobState.FAILED, error="晚到结果") is False
         assert database.get_job(job_id)["state"] == JobState.COMPLETED
@@ -411,7 +410,7 @@ def test_failed_job_can_retry_with_existing_audio(tmp_path: Path) -> None:
     assert next_state == JobState.WAITING_ASR
     assert retried["state"] == JobState.WAITING_ASR
     assert retried["last_error"] is None
-    assert retried["audio_path"] == path_text(audio)
+    assert retried["audio_path"] == same_path(audio)
 
 
 def test_cancelled_job_returns_to_pending_and_resumes_from_progress(tmp_path: Path) -> None:
@@ -453,7 +452,7 @@ def test_cancelled_job_returns_to_pending_and_resumes_from_progress(tmp_path: Pa
     cancelled = database.get_job(job_id)
     assert cancelled["state"] == JobState.PENDING
     assert cancelled["last_error"] is None
-    assert cancelled["audio_path"] == path_text(audio)
+    assert cancelled["audio_path"] == same_path(audio)
 
     assert database.start_job(job_id) == JobState.WAITING_ASR
     assert database.get_job(job_id)["state"] == JobState.WAITING_ASR
@@ -502,8 +501,8 @@ def test_cancelled_translation_reuses_existing_asr_result(tmp_path: Path) -> Non
 
     retried = database.get_job(job_id)
     assert retried["state"] == JobState.ASR_COMPLETED
-    assert retried["source_result_path"] == path_text(ja_result)
-    assert retried["audio_path"] == path_text(audio)
+    assert retried["source_result_path"] == same_path(ja_result)
+    assert retried["audio_path"] == same_path(audio)
 
 
 def test_retry_recovers_asr_file_when_old_version_cleared_database_path(tmp_path: Path) -> None:
@@ -538,7 +537,7 @@ def test_retry_recovers_asr_file_when_old_version_cleared_database_path(tmp_path
     next_state = database.start_job(job_id, reusable_source_result_path=cached_asr)
 
     assert next_state == JobState.ASR_COMPLETED
-    assert database.get_job(job_id)["source_result_path"] == path_text(cached_asr)
+    assert database.get_job(job_id)["source_result_path"] == same_path(cached_asr)
 
 
 def test_cancelled_job_is_completed_when_scan_finds_existing_subtitle(tmp_path: Path) -> None:
@@ -620,7 +619,7 @@ def test_scan_outcome_creates_listed_jobs_that_cannot_be_reprocessed(tmp_path: P
 
     jobs = {job["media_id"]: job for job in database.list_jobs()}
     done, unusable = jobs[done_id], jobs[unusable_id]
-    assert done["state"] == JobState.COMPLETED and done["subtitle_path"] == path_text(subtitle)
+    assert done["state"] == JobState.COMPLETED and done["subtitle_path"] == same_path(subtitle)
     assert unusable["state"] == JobState.FAILED
     assert render(unusable["last_error"]) == "无法可靠确定日语主音轨。"
     assert {done["source_kind"], unusable["source_kind"]} == {SourceKind.NONE}
@@ -851,7 +850,7 @@ def test_pending_job_drops_kept_progress_when_language_pair_changes(tmp_path: Pa
         changed=False,
         pair=LanguagePair(),
     )
-    assert database.get_job(job_id)["audio_path"] == path_text(audio)
+    assert database.get_job(job_id)["audio_path"] == same_path(audio)
 
     database.create_or_reset_job(
         media_id=media_id,
@@ -947,7 +946,7 @@ def test_interrupted_publish_recovers_new_output_name(tmp_path: Path) -> None:
 
     recovered = database.get_job(job_id)
     assert recovered["state"] == JobState.COMPLETED
-    assert recovered["subtitle_path"] == path_text(subtitle)
+    assert recovered["subtitle_path"] == same_path(subtitle)
 
 
 def test_job_pause_resume_and_priority_order(tmp_path: Path) -> None:
@@ -1045,16 +1044,16 @@ def test_reprocess_levels_keep_only_reusable_stage_files(tmp_path: Path) -> None
 
     assert database.reprocess_job(job_id, "retranslate") == JobState.ASR_COMPLETED
     retranslate = database.get_job(job_id)
-    assert retranslate["source_result_path"] == path_text(ja_result)
+    assert retranslate["source_result_path"] == same_path(ja_result)
     assert retranslate["asr_duration_seconds"] == 123.5
-    assert retranslate["target_result_path"] == path_text(zh_result)
+    assert retranslate["target_result_path"] == same_path(zh_result)
     assert retranslate["translation_stats_json"] == '{"provider_cue_counts":{"grok":1}}'
     assert retranslate["reprocess_mode"] == "retranslate"
 
     assert database.pause_job(job_id) is True
     assert database.reprocess_job(job_id, "reasr") == JobState.WAITING_ASR
     reasr = database.get_job(job_id)
-    assert reasr["audio_path"] == path_text(audio)
+    assert reasr["audio_path"] == same_path(audio)
     assert reasr["source_result_path"] is None
     assert reasr["asr_duration_seconds"] is None
     assert reasr["target_result_path"] is None
@@ -1102,7 +1101,7 @@ def test_completed_job_can_reprocess_and_claim_existing_target_subtitle(tmp_path
 
     assert database.reprocess_job(job_id, "full") == JobState.DISCOVERED
     queued = database.get_job(job_id)
-    assert queued["subtitle_path"] == path_text(subtitle)
+    assert queued["subtitle_path"] == same_path(subtitle)
     assert queued["reprocess_mode"] == "full"
     assert database.record_scan_outcome(
         media_id=media_id, outcome="done", reason="目标字幕文件已存在", pair=LanguagePair()
@@ -1147,9 +1146,9 @@ def test_completed_job_can_retranslate_and_keeps_published_subtitle(tmp_path: Pa
     assert database.reprocess_job(job_id, "retranslate") == JobState.ASR_COMPLETED
 
     retranslate = database.get_job(job_id)
-    assert retranslate["source_result_path"] == path_text(ja_result)
+    assert retranslate["source_result_path"] == same_path(ja_result)
     assert retranslate["target_result_path"] is None
-    assert retranslate["subtitle_path"] == path_text(subtitle)
+    assert retranslate["subtitle_path"] == same_path(subtitle)
     assert render(subtitle.read_text(encoding="utf-8")) == "旧字幕"
 
 

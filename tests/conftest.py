@@ -69,3 +69,19 @@ def raises_rendered(exc_type: type[BaseException], pattern: str) -> Iterator[pyt
         yield info
     text = render(str(info.value))
     assert re.search(pattern, text), text
+
+
+class same_path:
+    """与数据库里的路径比较时用：Windows 上路径可能用 / 或 \\ 分隔，按指向的位置比较。
+
+    ``assert job["audio_path"] == same_path(audio)``
+    """
+
+    def __init__(self, expected: Any) -> None:
+        self.expected = Path(expected)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, (str, Path)) and Path(other) == self.expected
+
+    def __repr__(self) -> str:
+        return f"same_path({str(self.expected)!r})"

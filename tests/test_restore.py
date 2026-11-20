@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
-from conftest import PROTOCOL, prepare_server, raises_rendered
+from conftest import PROTOCOL, prepare_server, raises_rendered, same_path
 from fastapi.testclient import TestClient
 
 from video_turbo.config import AppConfig, SubtitleConfig
@@ -26,7 +26,6 @@ from video_turbo.restore import (
     sidecar_files,
     upload_temp_path,
 )
-from video_turbo.source_paths import text as path_text
 from video_turbo.worker import restore_task
 from video_turbo.worker.config import JasnaConfig, WorkerConfig
 from video_turbo.worker.jasna_progress import OutputSplitter, parse_progress_line
@@ -363,7 +362,7 @@ def test_restore_end_to_end_with_resumed_transfers(tmp_path: Path, monkeypatch) 
         assert (new_dir / "ABC-123-U.zh.default.srt").is_file()
         assert (new_dir / "ABC-123-U.jasna.json").is_file()
         assert Path(job["backup_path"]) == backup / "lib" / "ABC-123" / "ABC-123.mp4"
-        assert database.get_media(media_id)["path"] == path_text(new_dir / "ABC-123-U.mp4")
+        assert database.get_media(media_id)["path"] == same_path(new_dir / "ABC-123-U.mp4")
         media = client.get("/api/restore/media", params={"status": "all"}).json()
         assert {item["media_id"]: item for item in media["items"]}[media_id]["can_restore"] is False
 
