@@ -4,10 +4,11 @@
 //! 管道同样会关闭，子进程不会留在后台。Windows 上以“不显示窗口”启动，子进程再启动的 ffmpeg 也不会弹窗。
 
 use std::ffi::OsString;
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, ExitStatus, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -56,6 +57,51 @@ pub fn spawn(spec: &Spec) -> io::Result<Running> {
     let mut child = command.spawn()?;
     let stdin = child.stdin.take();
     Ok(Running { child, stdin })
+}
+
+/// 运行到结束，逐行交给 `on_line`（标准输出和错误都算），同时追加到 `spec.output`。
+pub fn run_lines(spec: &Spec, mut on_line: impl FnMut(&str)) -> io::Result<ExitStatus> {
+    let mut log = logfile::open_append(&spec.output)?;
+    let mut command = Command::new(&spec.program);
+    command
+        .args(&spec.args)
+        .envs(spec.env.iter().map(|(key, value)| (key, value)))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(cwd) = &spec.cwd {
+        command.current_dir(cwd);
+    }
+    hide_window(&mut command);
+    let mut child = command.spawn()?;
+    let (sender, receiver) = mpsc::channel::<String>();
+    let mut readers = Vec::new();
+    for stream in [
+        child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>),
+        child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let sender = sender.clone();
+        readers.push(thread::spawn(move || {
+            for line in BufReader::new(stream).split(b'\n').map_while(Result::ok) {
+                let text = String::from_utf8_lossy(&line).trim_end_matches('\r').to_string();
+                if sender.send(text).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(sender);
+    for line in receiver {
+        let _ = writeln!(log, "{line}");
+        on_line(&line);
+    }
+    for reader in readers {
+        let _ = reader.join();
+    }
+    child.wait()
 }
 
 impl Running {
@@ -135,6 +181,26 @@ mod tests {
         assert!(!http_ok(port, "/health", Duration::from_secs(2)));
         server.join().unwrap();
         assert!(!http_ok(port, "/health", Duration::from_millis(200)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_lines_streams_both_outputs() {
+        let dir = std::env::temp_dir().join(format!("vt-lines-{}", std::process::id()));
+        let spec = Spec {
+            program: "sh".into(),
+            args: vec!["-c".into(), "echo one; echo two >&2; printf 'three'".into()],
+            cwd: None,
+            env: vec![],
+            output: dir.join("out.log"),
+        };
+        let mut lines = Vec::new();
+        let status = run_lines(&spec, |line| lines.push(line.to_string())).unwrap();
+        assert!(status.success());
+        lines.sort();
+        assert_eq!(lines, ["one", "three", "two"]);
+        assert!(std::fs::read_to_string(dir.join("out.log")).unwrap().contains("three"));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]

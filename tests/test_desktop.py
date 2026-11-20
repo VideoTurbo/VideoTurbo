@@ -26,6 +26,12 @@ def test_bundled_repository_files_exist() -> None:
         assert (APP / icon).is_file(), icon
 
 
+def test_uv_downloads_are_pinned_for_both_platforms() -> None:
+    source = (ROOT / "deploy" / "desktop" / "build_sidecar.py").read_text(encoding="utf-8")
+    for platform in ("darwin-arm64", "win32-x64"):
+        assert re.search(rf'"{platform}": \("uv-[^"]+", "[0-9a-f]{{64}}"\)', source), platform
+
+
 def test_ffmpeg_downloads_are_pinned_for_both_platforms() -> None:
     source = (ROOT / "deploy" / "desktop" / "build_sidecar.py").read_text(encoding="utf-8")
     for platform in ("darwin-arm64", "win32-x64"):

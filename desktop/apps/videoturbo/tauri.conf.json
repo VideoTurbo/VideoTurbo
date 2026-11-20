@@ -25,6 +25,7 @@
       "resources/server/": "server/",
       "resources/ffmpeg/": "ffmpeg/",
       "resources/worker-bundle/": "worker-bundle/",
+      "resources/uv/": "uv/",
       "icons/tray.png": "icons/tray.png",
       "../../../LICENSE": "LICENSE"
     },

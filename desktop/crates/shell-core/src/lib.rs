@@ -4,8 +4,12 @@
 //! - [`settings`]：外壳自己的设置文件（端口、局域网访问等），与主程序数据库里的设置分开。
 //! - [`logfile`]：外壳日志和子进程输出写到日志文件夹。
 //! - [`locale`]：界面语言，中文以外一律英文。
+//! - [`connection`]：解析控制台给出的接入串（主程序地址 + 接入密钥）。
+//! - [`worker_env`]：识别程序的运行环境（安装、升级、配置、启动参数）。
 
+pub mod connection;
 pub mod locale;
 pub mod logfile;
 pub mod process;
 pub mod settings;
+pub mod worker_env;
