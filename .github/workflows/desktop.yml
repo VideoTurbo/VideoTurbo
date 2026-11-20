@@ -42,12 +42,18 @@ jobs:
           cache-dependency-path: |
             web/package-lock.json
             desktop/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
+      # runner 自带 rustup；仓库只允许 GitHub 官方和已验证发布者的 action，所以不用第三方的 Rust action。
+      - name: 安装 Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update && rustup default stable
+      - uses: actions/cache@v6
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            desktop/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('desktop/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
       - name: 安装打包依赖
         run: uv sync --locked --python 3.11 --extra orchestrator --extra desktop
       - name: 打包主程序、FFmpeg 和云机部署包
