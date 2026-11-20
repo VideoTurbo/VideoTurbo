@@ -20,6 +20,7 @@ from video_turbo.models import Cue, JobState, SourceKind
 from video_turbo.orchestrator.app import app
 from video_turbo.orchestrator.processor import Orchestrator
 from video_turbo.plugins import registry
+from video_turbo.source_paths import text as path_text
 
 TOKEN = "token"
 HEADERS = {**PROTOCOL, "X-Worker-Token": TOKEN}
@@ -167,7 +168,8 @@ def test_library_api_create_edit_delete_and_browse(tmp_path: Path, monkeypatch) 
         assert renamed.status_code == 200
         library = app.state.config.library(library_id)
         assert render(library.name) == "日本电影" and not library.enabled and library.target_language == "zh-TW"
-        assert library.path == str(media_root / "movies")
+        # 媒体库路径统一用 / 分隔保存（Windows 上是 C:/…）。
+        assert library.path == path_text(media_root / "movies")
 
         # 有进行中的任务时不能删除；删除后影片记录随之清除。
         movie = media_root / "movies" / "a.mkv"
