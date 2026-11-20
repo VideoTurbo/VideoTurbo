@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-turbo"
+# 版本号只写在 src/video_turbo/__init__.py 的 __version__。
+dynamic = ["version"]
+description = "VideoTurbo：自托管的媒体库字幕生成与影片修复工具，由主控和跨平台 GPU Worker 组成"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "VideoTurbo contributors" }]
+dependencies = [
+  "pydantic>=2.10,<3",
+  "PyYAML>=6.0.2,<7",
+]
+
+[project.optional-dependencies]
+orchestrator = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "httpx>=0.28,<1",
+  # 开云机后通过 SSH 推送代码并启动 Worker。
+  "asyncssh>=2.17,<3",
+  # Vertex AI 服务账号 JSON：用私钥签发换取访问令牌的 JWT。
+  "cryptography>=42",
+]
+worker = [
+  "faster-whisper>=1.2,<2",
+  # 4.6.3 起正式支持 RTX 5090（Blackwell / sm_120）与 CUDA 12.8。
+  "ctranslate2>=4.6.3,<5",
+  "httpx>=0.28,<1",
+  "psutil>=5.9,<8",
+  "nvidia-cublas-cu12>=12.6,<13; platform_system == 'Windows'",
+  "nvidia-cudnn-cu12>=9.3,<10; platform_system == 'Windows'",
+  "nvidia-cublas-cu12>=12.8,<12.9; platform_system == 'Linux'",
+  "nvidia-cudnn-cu12>=9.3,<10; platform_system == 'Linux'",
+]
+# 只运行影片修复服务（Jasna 自带运行环境）时的最小依赖，不含字幕识别模型与 CUDA 库。
+restore = [
+  "httpx>=0.28,<1",
+  "psutil>=5.9,<8",
+]
+dev = [
+  "psutil>=5.9,<8",
+  "pytest>=8.4,<9",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+video-turbo-server = "video_turbo.orchestrator.app:main"
+video-turbo-worker = "video_turbo.worker.main:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "video_turbo.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# login.html 是独立的静态页；dashboard/ 是 web/ 的构建产物。
+"video_turbo.orchestrator" = ["static/login.html", "static/dashboard/**/*"]
+"video_turbo.plugins" = ["icons/*.svg"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# 函数复杂度上限：超过时拆成几个小函数，而不是继续堆分支。
+extend-select = ["C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 20

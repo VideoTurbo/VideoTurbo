@@ -1,0 +1,111 @@
+# VideoTurbo 显卡电脑服务配置模板，Windows 和 Linux 共用。
+# 复制为 config/worker.yaml 后填写 server_url 和 worker_token；安装脚本会在首次安装时自动复制。
+# 机器名称按本机硬件自动生成，无需填写。
+
+# 主程序地址（不是 Emby 地址），必填。局域网示例：http://192.168.1.10:8765。
+# 云主机等不在局域网的机器推荐填写 Tailscale/WireGuard 地址；经端口转发走公网时，
+# 填主程序的机器接入端口（8766），并放在 HTTPS 反向代理之后。
+server_url: ""
+# 接入密钥：从主程序控制台“设置 → 云主机 → 接入密钥”复制，必填。
+worker_token: ""
+# auto 自动选择：NVIDIA 显卡用 cuda，否则用 CPU（明显更慢）。
+device: auto
+# nvidia-smi 中的 GPU 序号，单卡主机一般为 0。
+device_index: 0
+# 没有任务时的轮询间隔（秒）。
+poll_interval_seconds: 5
+# 向主程序报告状态的间隔（秒），需小于主程序判定任务超时的时间。
+heartbeat_interval_seconds: 20
+# 缓存目录（唯一一处）：null 使用 <项目>/cache，相对路径以本配置文件为基准。
+# 字幕识别的音频在 asr/<片名>-<短ID>/，影片修复的原片和结果在 restore/<片名>-<短ID>/。
+# 影片修复要求该目录在本机磁盘且路径只含英文；每部影片约占 3 倍体积，空间不够时改到大容量磁盘。
+cache_dir: null
+
+idle:
+  # 空闲检测：专用于 VideoTurbo 的机器（如租用的云 GPU）保持 false；
+  # 与游戏、桌面或其他 GPU 任务共用的电脑改为 true。Windows 脚本首次创建配置时会自动改为 true。
+  enabled: false
+  # GPU 使用率不高于此值才算空闲。没有 NVIDIA 显卡时改用系统 CPU 负载判断。
+  max_gpu_utilization: 20
+  # 至少剩余这些显存（MB）才接单：12 GB 显卡建议 8500，8 GB 显卡建议 5500。
+  # 没有 NVIDIA 显卡时改用系统可用内存判断，建议 4096。
+  min_free_memory_mb: 6000
+  # 连续多少次通过检查才接单。
+  consecutive_checks: 3
+  # 空闲检查间隔（秒）。
+  check_interval_seconds: 20
+
+# Faster-Whisper 模式的设置。识别模式由主程序控制台“设置”统一选择，默认 WhisperJAV。
+asr:
+  # 12 GB 及以上显存推荐 large-v3；8 GB 显存改用 large-v3-turbo。
+  model: large-v3
+  # 12 GB 及以上显存用 float16；8 GB 显存改用 int8_float16。CPU 会自动使用 int8。
+  compute_type: float16
+  # 搜索宽度，5 是速度和质量的折中。
+  beam_size: 5
+  # 长影片默认关闭 VAD，避免语音压缩后的时间戳恢复异常。
+  vad_filter: false
+  # 连续静音达到此长度（毫秒）时切开语音段。
+  vad_min_silence_duration_ms: 500
+  # 关闭跨段文本条件，可减少长视频中的重复、时间轴漂移和幻觉循环。
+  condition_on_previous_text: false
+  # 对长静音附近的疑似幻觉启用抑制；设为 null 可关闭。
+  hallucination_silence_threshold: 2.0
+  # 按词级时间戳二次切分，每条字幕最长秒数。
+  max_cue_duration_seconds: 6.0
+  # 单条字幕最多字符数。
+  max_cue_chars: 28
+  # 尽量让一条字幕至少包含这些字符，避免一句话被切成一两个字；完整短句除外。
+  min_cue_chars: 6
+  # 相邻词之间达到此静音秒数时切分字幕。
+  max_word_gap_seconds: 0.8
+  # 短字幕在不超过此停顿时自动与相邻字幕合并。
+  merge_short_cue_gap_seconds: 1.5
+  # 长影片按此时长（秒）分块识别，避免整片时间轴一起退化。
+  chunk_seconds: 300
+  # 某个块时间轴异常时，改用更小的固定块重试。
+  retry_chunk_seconds: 30
+  # 模型缓存目录，相对于本配置文件。云主机建议改到关机后不会清空的数据盘，
+  # 云主机或项目目录重建后可继续复用模型；Linux 安装脚本会询问该目录。
+  download_root: ../models
+
+# WhisperJAV 模式的设置；两种模式使用独立的模型与依赖。
+whisperjav:
+  # null 自动定位项目根目录 .venv-whisperjav 中的 Python。
+  python_executable: null
+  model: Qwen/Qwen3-ASR-1.7B
+  speech_segmenter: firered-vad
+  sensitivity: aggressive
+  # NVIDIA 显卡上让第一遍 FireRedVAD 也用 GPU；false 改回 CPU。
+  firered_vad_gpu: true
+  # 双遍时在 CUDA 且显存 ≥12 GB 的机器上同时运行两遍；显存不足自动串行。
+  parallel_passes: true
+  # 每部影片最大运行时间（秒），超时会停止识别。
+  timeout_seconds: 14400
+
+# 影片修复（Jasna），仅 Linux NVIDIA 显卡电脑可用，其他平台忽略本节。
+# 运行 bash deploy/worker/linux/worker.sh install restore 安装后自动设为 enabled: true。
+jasna:
+  enabled: false
+  # null 使用 <项目>/jasna/current/jasna。
+  executable: null
+  # 许可证激活信息（XDG_CONFIG_HOME）；null 使用 <项目>/jasna/config。不要分享该目录。
+  config_home: null
+  # 已用许可证激活后设为 true，才会领取 LTX 系列任务。
+  ltx: false
+  # LTX 快速模式（--ltx-fast）：约快 1.4 倍、细节略少，仅 RTX 50 系可用；开启后运行 worker.sh self-test restore 下载约 8 GB 模型。
+  ltx_fast: false
+  # 显存不足时调小，例如 60；null 使用 Jasna 默认 90。
+  max_clip_size: null
+  # 每部影片最长运行小时数。
+  timeout_hours: 48
+  # 传回结果时每块大小（MB）。
+  upload_chunk_mb: 64
+  # 下载原片的连接数（1–32），占用主程序一侧的上行带宽；1 为单连接。
+  download_connections: 16
+  # 传回结果的连接数（1–32），占用本机上行和主程序下行；1 为单连接。
+  upload_connections: 32
+  # 修复当前影片时提前下载下一部原片、在后台传回上一部结果；本机磁盘需容纳约 3 部影片。
+  pipeline: true
+  # 中断任务的本地文件保留小时数，期间同一任务回到本机可续传。
+  keep_partial_hours: 72

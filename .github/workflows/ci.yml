@@ -1,0 +1,50 @@
+# 提交到 main 和每个 PR 都运行；发布流程（release.yml）也先调用它，测试不过不发布。
+name: 测试
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      # 一部分测试真实调用 FFmpeg。
+      - name: 安装 FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: 安装依赖
+        run: uv sync --locked --python 3.11 --extra orchestrator --extra worker --extra dev
+      - name: 代码检查
+        run: uv run ruff check src tests tools
+      # 显卡电脑按 deploy/worker/requirements/ 安装，清单必须与 uv.lock 一致。
+      - name: 检查显卡电脑依赖清单
+        run: uv run python tools/export_requirements.py --check
+      - name: 单元测试
+        run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: 单元测试
+        run: npm test
+      - name: 类型检查与构建
+        run: npm run build

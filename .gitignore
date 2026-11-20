@@ -1,0 +1,69 @@
+# Machine-specific configuration; commit the *.example.* files instead.
+/config/worker.yaml
+/deploy/server/docker-compose.yml
+
+# Python virtual environments (including the isolated WhisperJAV backend).
+.venv/
+.venv-*/
+.test-venv/
+venv/
+env/
+
+# Generated Python packages and bytecode. Keep pyproject.toml and uv.lock.
+build/
+dist/
+.eggs/
+*.egg-info/
+*.egg
+__pycache__/
+*.py[cod]
+
+# 控制台前端：依赖和构建产物（由 web/ 生成）。
+node_modules/
+/src/video_turbo/orchestrator/static/dashboard/
+
+# Test, lint, type-checking and coverage caches.
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Runtime data, extracted audio, downloaded models and backups.
+data/
+logs/
+work/
+cache/
+backups/
+models/
+runtime/
+# Jasna 发布包与许可证激活信息。
+/jasna/
+*.log
+*.log.*
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# OS metadata and temporary editor files.
+.DS_Store
+.AppleDouble
+._*
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# Claude Code 本机配置。
+.claude/
+.cursorrules
+AGENTS.md
+CLAUDE.md

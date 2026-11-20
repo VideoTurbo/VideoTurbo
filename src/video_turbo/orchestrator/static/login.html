@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VideoTurbo · 登录</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <style>
+    :root{color-scheme:dark;--bg:#09090b;--bg-1:#0e0e11;--panel:#121215;--line:rgba(255,255,255,.1);--line-3:rgba(255,255,255,.16);
+      --text:#ededf0;--text-3:#6b6b76;--red:#f87171;
+      --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif}
+    *{box-sizing:border-box}
+    html{background:var(--bg)}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;color:var(--text);font:13px/1.5 var(--sans);-webkit-font-smoothing:antialiased;
+      background:radial-gradient(1100px 420px at 50% -240px,rgba(139,147,255,.09),transparent 70%),var(--bg)}
+    form{width:100%;max-width:340px;padding:28px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 16px 48px rgba(0,0,0,.5)}
+    h1{margin:0 0 6px;font-size:17px;font-weight:600}
+    p{margin:0 0 20px;font-size:12.5px;color:var(--text-3);line-height:1.6}
+    label{display:grid;gap:6px;margin-bottom:14px;font-weight:500}
+    input{width:100%;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg-1);color:var(--text);font:inherit}
+    input:focus{outline:none;border-color:#8b93ff;box-shadow:0 0 0 3px rgba(139,147,255,.3)}
+    button{width:100%;height:36px;margin-top:6px;border:0;border-radius:8px;color:#fff;font:inherit;font-weight:500;cursor:pointer;
+      background:linear-gradient(180deg,#9097ff,#6c74f2)}
+    button:disabled{opacity:.6;cursor:default}
+    #error{min-height:20px;margin:10px 0 0;color:var(--red);font-size:12.5px}
+    [hidden]{display:none}
+  </style>
+</head>
+<body>
+  <form id="form" hidden>
+    <h1 id="title">登录</h1>
+    <p id="lead">输入管理口令进入控制台。</p>
+    <label><span id="password-label">管理口令</span><input type="password" id="password" autocomplete="current-password" required autofocus></label>
+    <label id="confirm-row" hidden><span id="confirm-label">再输入一次</span><input type="password" id="confirm" autocomplete="new-password"></label>
+    <button type="submit" id="submit">登录</button>
+    <div id="error" role="alert"></div>
+  </form>
+  <script>
+    // 独立的登录页不经过控制台打包，文案写在这里；语言选择与控制台一致（本浏览器保存的选择优先，否则看浏览器语言）。
+    const MESSAGES={
+      'zh-Hans':{title:'VideoTurbo · 登录',login:'登录',lead:'输入管理口令进入控制台。',password:'管理口令',confirm:'再输入一次',
+        setupTitle:'设定管理口令',setupLead:n=>`首次使用，请为控制台设定管理口令（至少 ${n} 位）。之后在这台和其他设备上都用它登录。`,
+        setupSubmit:'保存并进入',unreachable:'连不上主程序：',tooShort:n=>`口令至少 ${n} 位。`,mismatch:'两次输入的口令不一致。',
+        failed:code=>`登录失败（错误码 ${code}）`,network:'连接失败：'},
+      en:{title:'VideoTurbo · Sign in',login:'Sign in',lead:'Enter the admin password to open the dashboard.',password:'Admin password',confirm:'Enter it again',
+        setupTitle:'Set the admin password',setupLead:n=>`First run: set an admin password for the dashboard (at least ${n} characters). Use it to sign in on this and other devices.`,
+        setupSubmit:'Save and continue',unreachable:'Cannot reach the main app: ',tooShort:n=>`The password needs at least ${n} characters.`,mismatch:'The two passwords don\'t match.',
+        failed:code=>`Sign-in failed (error ${code})`,network:'Connection failed: '}};
+    function pickLocale(){
+      const normalize=value=>{const code=(value||'').toLowerCase();return code.startsWith('zh')?'zh-Hans':code.startsWith('en')?'en':null};
+      try{const saved=normalize(localStorage.getItem('video-turbo-locale'));if(saved)return saved}catch(error){}
+      for(const language of navigator.languages||[navigator.language]){const found=normalize(language);if(found)return found}
+      return 'en';
+    }
+    const LOCALE=pickLocale(),M=MESSAGES[LOCALE];
+    document.documentElement.lang=LOCALE==='en'?'en':'zh-CN';document.title=M.title;
+    for(const [id,key] of [['title','login'],['lead','lead'],['password-label','password'],['confirm-label','confirm'],['submit','login']])
+      document.getElementById(id).textContent=M[key];
+    const form=document.getElementById('form'),password=document.getElementById('password'),confirmInput=document.getElementById('confirm'),
+      submit=document.getElementById('submit'),errorNode=document.getElementById('error');
+    let setup=false,minLength=8;
+    async function init(){
+      try{
+        const state=await (await fetch('/api/auth/status',{cache:'no-store',headers:{'Accept-Language':LOCALE}})).json();
+        if(state.authenticated){location.replace('/');return}
+        setup=!state.configured;minLength=state.min_password_length||8;
+        if(setup){
+          document.getElementById('title').textContent=M.setupTitle;
+          document.getElementById('lead').textContent=M.setupLead(minLength);
+          document.getElementById('confirm-row').hidden=false;confirmInput.required=true;
+          password.autocomplete='new-password';submit.textContent=M.setupSubmit;
+        }
+      }catch(error){errorNode.textContent=M.unreachable+error.message}
+      form.hidden=false;password.focus();
+    }
+    form.addEventListener('submit',async event=>{
+      event.preventDefault();errorNode.textContent='';
+      if(setup&&password.value.length<minLength){errorNode.textContent=M.tooShort(minLength);return}
+      if(setup&&password.value!==confirmInput.value){errorNode.textContent=M.mismatch;return}
+      submit.disabled=true;
+      try{
+        const response=await fetch(setup?'/api/auth/setup':'/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json','Accept-Language':LOCALE},
+          body:JSON.stringify({password:password.value})});
+        if(response.ok){location.replace('/');return}
+        const body=await response.json().catch(()=>({}));
+        if(response.status===409){location.reload();return}
+        errorNode.textContent=typeof body.detail==='string'?body.detail:(response.status===422?M.tooShort(minLength):M.failed(response.status));
+      }catch(error){errorNode.textContent=M.network+error.message}
+      submit.disabled=false;
+    });
+    init();
+  </script>
+</body>
+</html>

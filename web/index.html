@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>VideoTurbo</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script>
+      // 提前恢复主题，避免刷新时先闪现暗色页面。
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem('video-turbo-theme') === 'light' ? 'light' : 'dark'
+      } catch (error) {}
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

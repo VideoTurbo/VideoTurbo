@@ -1,0 +1,27 @@
+.git
+.gitignore
+.test-venv
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+tests
+deploy/worker/windows
+data
+logs
+cache
+backups
+models
+runtime
+
+
+.venv-whisperjav/
+
+build/
+dist/
+work/
+*.egg-info/
+
+# 控制台前端在镜像构建阶段重新生成，不使用本机的依赖和产物。
+web/node_modules
+src/video_turbo/orchestrator/static/dashboard

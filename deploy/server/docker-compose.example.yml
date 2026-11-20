@@ -1,0 +1,56 @@
+# VideoTurbo 主程序。这是主程序唯一需要的文件：放进一个新建的文件夹，改名为 docker-compose.yml，
+# 按下面标了“改”的几处填好后，在该文件夹里启动：
+#   docker compose up -d
+# 更新到新版本：
+#   docker compose pull && docker compose up -d
+#
+# 其余设置（媒体库、翻译模型、媒体服务器、通知、插件、接入密钥等）都在控制台里修改，保存在 ./data 的数据库中，立即生效。
+services:
+  orchestrator:
+    # latest 始终是最新正式版；想固定版本时写成版本号，例如 ghcr.io/videoturbo/videoturbo:1.2。
+    image: ghcr.io/videoturbo/videoturbo:latest
+    # 开发者从源码构建：把本文件放在项目的 deploy/server 下，删掉上面的 image，改用下面三行，
+    # 再运行 docker compose up -d --build。
+    # build:
+    #   context: ../..
+    #   dockerfile: deploy/server/Dockerfile
+    container_name: video-turbo
+    restart: unless-stopped
+    ports:
+      # 控制台。左边是访问用的端口，可以改；右边不要改。
+      - "8765:8765"
+      # 机器接入端口：只给显卡电脑上的服务用。不在同一局域网的机器要从外网连时，只开放这个端口。
+      - "8766:8766"
+    environment:
+      # 改：服务时区。
+      TZ: Asia/Shanghai
+      # 可选：推送通知（Webhook 等）的语言，zh-Hans（默认）或 en。控制台界面跟随浏览器，可在设置里切换。
+      # Optional: language of pushed notifications (webhooks etc.), zh-Hans (default) or en.
+      # VIDEO_TURBO_LANGUAGE: en
+      # 可选：控制台放在反向代理之后、且代理不在本机时，填写代理的 IP 或网段（逗号分隔）。
+      # VIDEO_TURBO_TRUSTED_PROXIES: 172.18.0.0/16
+      # 可选：插件导致主程序出问题时，去掉下一行开头的 # 并运行 docker compose up -d，启动时不加载控制台里装的插件，只能卸载。处理完后再加回 #。
+      # VIDEO_TURBO_SAFE_MODE: "1"
+    volumes:
+      # 数据库和主程序日志（logs/server.log，满 10 MB 轮换，保留 5 个旧文件），保存在本文件所在目录。
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # 缓存（唯一一处）：subtitles/<片名>-<短ID>/ 是字幕中间文件，thumbnails/ 是海报缩略图。
+      - ./cache:/app/cache
+      # 影片修复的原片备份，必须在媒体库之外。原片会整份复制过来，左侧要选空间足够的盘。
+      - ./backups:/app/backups
+      # 改：影片目录。左边写你电脑上影片所在的文件夹，右边是程序里看到的名字（必须以 /media 开头），每个媒体库一行。
+      # 写字幕和影片修复都要往影片文件夹里写文件，不要设成只读。加好后到控制台“设置 → 媒体库”添加。
+      - /path/to/your/media:/media/library_1
+      # - /path/to/another/library:/media/library_2
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3

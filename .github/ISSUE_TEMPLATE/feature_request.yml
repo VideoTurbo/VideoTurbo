@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a new feature or an improvement.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe your use case first; there may be an existing way to do it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including whether this could be built as a plugin instead (see the Plugins section of the README).
+  - type: input
+    id: version
+    attributes:
+      label: VideoTurbo version you are using
+      placeholder: "0.1.20"

@@ -1,0 +1,76 @@
+name: Bug report
+description: Something does not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please search existing issues first, and fill in every required field so the problem can be reproduced.
+  - type: input
+    id: version
+    attributes:
+      label: VideoTurbo version
+      description: Shown next to the logo in the dashboard, e.g. 0.1.20. If a GPU PC runs a different version, give both.
+      placeholder: "0.1.20"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Where does it happen?
+      multiple: true
+      options:
+        - Main app (Docker)
+        - Dashboard (web UI)
+        - GPU PC – Windows
+        - GPU PC – Linux
+        - Cloud host
+        - Translation
+        - Video restoration
+        - Plugin
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Host OS / NAS model, GPU model and driver version, and plugin name if a plugin is involved.
+      placeholder: "Unraid 7.0, RTX 4090 (driver 570.xx), Windows 11"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Include the exact error message shown in the dashboard, if any.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics bundle
+      description: |
+        In the dashboard open Settings → 日志与环境 (Logs & environment) → 下载诊断包 (Download diagnostics), then drag the zip file here.
+        API keys and tokens are removed automatically, but the log may contain video file names — check it before posting.
+    validations:
+      required: true
+  - type: textarea
+    id: worker-logs
+    attributes:
+      label: GPU PC logs (if the problem involves a GPU PC)
+      description: |
+        Linux: `bash deploy/worker/linux/worker.sh logs asr --lines 200` (or `logs restore`)
+        Windows: `.\deploy\worker\windows\worker.ps1 logs -Lines 200`
+      render: shell
