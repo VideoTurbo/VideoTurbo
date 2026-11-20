@@ -45,7 +45,8 @@ pyz = PYZ(a.pure)  # noqa: F821
 exe = EXE(  # noqa: F821
     pyz,
     a.scripts,
-    [],
+    # 打包后的程序不读 PYTHON* 环境变量，UTF-8 模式要在这里打开：读写文件不受 Windows 系统代码页影响。
+    [("X utf8_mode=1", None, "OPTION")],
     exclude_binaries=True,
     name="videoturbo-server",
     console=True,

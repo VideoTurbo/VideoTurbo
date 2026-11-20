@@ -30,6 +30,9 @@ jobs:
           - os: macos-latest
             bundle: dmg
     runs-on: ${{ matrix.os }}
+    env:
+      # 打包脚本输出中文；Windows 控制台默认代码页不是 UTF-8。
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
