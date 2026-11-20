@@ -24,4 +24,4 @@ body:
     id: version
     attributes:
       label: VideoTurbo version you are using
-      placeholder: "0.1.20"
+      placeholder: "0.1.0"

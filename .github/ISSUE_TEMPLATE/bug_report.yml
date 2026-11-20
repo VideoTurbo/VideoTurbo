@@ -10,8 +10,8 @@ body:
     id: version
     attributes:
       label: VideoTurbo version
-      description: Shown next to the logo in the dashboard, e.g. 0.1.20. If a GPU PC runs a different version, give both.
-      placeholder: "0.1.20"
+      description: Shown next to the logo in the dashboard, e.g. 0.1.0. If a GPU PC runs a different version, give both.
+      placeholder: "0.1.0"
     validations:
       required: true
   - type: dropdown
