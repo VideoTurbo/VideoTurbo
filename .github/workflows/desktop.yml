@@ -1,0 +1,82 @@
+# 桌面版安装包：Windows（NSIS，按当前用户安装）和 macOS（Apple 芯片，dmg）。
+# PyInstaller 不能跨平台打包，每个平台在各自的 runner 上构建。改动桌面版或主程序代码的 PR 都会构建一次，
+# 产物作为 artifact 上传，可下载试用。暂不做代码签名：macOS 只做 ad-hoc 签名，Windows 不签名。
+name: 桌面版
+
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "deploy/desktop/**"
+      - "src/**"
+      - "web/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundle: nsis
+          - os: macos-latest
+            bundle: dmg
+    runs-on: ${{ matrix.os }}
+    env:
+      # 打包脚本输出中文；Windows 控制台默认代码页不是 UTF-8。
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+      # runner 自带 rustup；仓库只允许 GitHub 官方和已验证发布者的 action，所以不用第三方的 Rust action。
+      - name: 安装 Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update && rustup default stable
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            desktop/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('desktop/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+      - name: 安装打包依赖
+        run: uv sync --locked --python 3.11 --extra orchestrator --extra desktop
+      - name: 打包主程序、FFmpeg 和云机部署包
+        run: uv run python deploy/desktop/build_sidecar.py
+      - name: 外壳代码检查与单元测试
+        working-directory: desktop
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo test --locked
+      - name: 安装 Tauri 命令行工具
+        working-directory: desktop
+        run: npm ci
+      - name: 构建安装包
+        working-directory: desktop/apps/videoturbo
+        run: npx --prefix ../.. tauri build --bundles ${{ matrix.bundle }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: VideoTurbo-${{ matrix.bundle }}
+          path: |
+            desktop/target/release/bundle/nsis/*.exe
+            desktop/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error

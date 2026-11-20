@@ -41,11 +41,13 @@
       'zh-Hans':{title:'VideoTurbo · 登录',login:'登录',lead:'输入管理口令进入控制台。',password:'管理口令',confirm:'再输入一次',
         setupTitle:'设定管理口令',setupLead:n=>`首次使用，请为控制台设定管理口令（至少 ${n} 位）。之后在这台和其他设备上都用它登录。`,
         setupSubmit:'保存并进入',unreachable:'连不上主程序：',tooShort:n=>`口令至少 ${n} 位。`,mismatch:'两次输入的口令不一致。',
-        failed:code=>`登录失败（错误码 ${code}）`,network:'连接失败：'},
+        failed:code=>`登录失败（错误码 ${code}）`,network:'连接失败：',
+        localOnly:'还没有设定管理口令。请先在运行 VideoTurbo 的电脑上打开控制台，在“设置 → 账户”里设定，再从这台设备登录。'},
       en:{title:'VideoTurbo · Sign in',login:'Sign in',lead:'Enter the admin password to open the dashboard.',password:'Admin password',confirm:'Enter it again',
         setupTitle:'Set the admin password',setupLead:n=>`First run: set an admin password for the dashboard (at least ${n} characters). Use it to sign in on this and other devices.`,
         setupSubmit:'Save and continue',unreachable:'Cannot reach the main app: ',tooShort:n=>`The password needs at least ${n} characters.`,mismatch:'The two passwords don\'t match.',
-        failed:code=>`Sign-in failed (error ${code})`,network:'Connection failed: '}};
+        failed:code=>`Sign-in failed (error ${code})`,network:'Connection failed: ',
+        localOnly:'No admin password is set yet. Open the console on the computer running VideoTurbo, set one under Settings → Account, then sign in from this device.'}};
     function pickLocale(){
       const normalize=value=>{const code=(value||'').toLowerCase();return code.startsWith('zh')?'zh-Hans':code.startsWith('en')?'en':null};
       try{const saved=normalize(localStorage.getItem('video-turbo-locale'));if(saved)return saved}catch(error){}
@@ -64,6 +66,13 @@
         const state=await (await fetch('/api/auth/status',{cache:'no-store',headers:{'Accept-Language':LOCALE}})).json();
         if(state.authenticated){location.replace('/');return}
         setup=!state.configured;minLength=state.min_password_length||8;
+        // 桌面版只能在运行 VideoTurbo 的电脑上设定口令，其他设备只显示说明。
+        if(setup&&state.setup_allowed===false){
+          document.getElementById('title').textContent=M.setupTitle;
+          document.getElementById('lead').textContent=M.localOnly;
+          password.parentElement.hidden=true;submit.hidden=true;form.hidden=false;
+          return;
+        }
         if(setup){
           document.getElementById('title').textContent=M.setupTitle;
           document.getElementById('lead').textContent=M.setupLead(minLength);

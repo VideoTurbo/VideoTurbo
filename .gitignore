@@ -67,3 +67,7 @@ Desktop.ini
 .cursorrules
 AGENTS.md
 CLAUDE.md
+# 桌面版：Rust 构建产物和打包前准备的资源（deploy/desktop/build_sidecar.py 生成）。
+/desktop/target/
+/desktop/apps/*/resources/
+/desktop/apps/*/gen/

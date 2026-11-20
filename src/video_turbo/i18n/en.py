@@ -385,6 +385,8 @@ MESSAGES: dict[str, str] = {
     "auth.loginFirst": "Sign in first.",
     "auth.alreadySet": "The admin password is already set; sign in.",
     "auth.notSet": "The admin password isn't set yet.",
+    "auth.setupLocalOnly": "No admin password is set yet. Open the console on the computer running VideoTurbo, set one under Settings → Account, then sign in from this device.",
+    "auth.desktopTokenInvalid": "This sign-in link has expired. Open the console again from the VideoTurbo tray menu.",
     "auth.tooMany": "Too many attempts; try again in 5 minutes.",
     "auth.wrong": "Incorrect password.",
     "auth.wrongCurrent": "The current password is incorrect.",

@@ -1,0 +1,23 @@
+# VideoTurbo 桌面版：Tauri 外壳。
+# - crates/shell-core：两个应用共用的部分（子进程管理、设置文件、日志、界面文字）。
+# - apps/videoturbo：主程序应用，带着打包好的主程序（deploy/desktop/build_sidecar.py 生成）。
+# 识别机应用（apps/worker）在后续阶段加入。
+[workspace]
+resolver = "2"
+members = ["crates/shell-core", "apps/videoturbo"]
+
+[workspace.package]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+rust-version = "1.80"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sys-locale = "0.3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

@@ -24,7 +24,7 @@ jobs:
       - name: 安装依赖
         run: uv sync --locked --python 3.11 --extra orchestrator --extra worker --extra dev
       - name: 代码检查
-        run: uv run ruff check src tests tools
+        run: uv run ruff check src tests tools deploy/desktop
       # 显卡电脑按 deploy/worker/requirements/ 安装，清单必须与 uv.lock 一致。
       - name: 检查显卡电脑依赖清单
         run: uv run python tools/export_requirements.py --check

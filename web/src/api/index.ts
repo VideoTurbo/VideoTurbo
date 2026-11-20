@@ -1,7 +1,7 @@
 // 主控接口。每个函数对应一个后端路由，界面代码不直接拼 URL。
 import { del, get, post, put, seg } from './http'
 import type {
-  AppConfig, AsrSettings, BatchResult, CloudInstanceGroup, CloudOrphanProfile, CloudProvider, CloudProviderType,
+  AppConfig, AsrSettings, AuthStatus, BatchResult, CloudInstanceGroup, CloudOrphanProfile, CloudProvider, CloudProviderType,
   CloudSettings, ConfigValues, ConnectionKind, ConnectionPayload, JobDetail, JobPage, Launch, LaunchOptions, LaunchPayload, LaunchTarget,
   FieldValue, FolderPage, LibraryPayload, MediaLibrary, MediaSourceOption, NodePayload, Notice, NoticeSummary, PluginConnection, PluginList, PluginPreview, PluginRepository, PluginResult, PluginSettingsInfo, PluginType, PluginUpdateCheck, RestoreAction, RestoreMediaPage,
   RestoreStatus, ShutdownMode, Status, UiSettings,
@@ -84,6 +84,8 @@ export const api = {
   resetWorkerToken: () => post<{ token: string }>('/api/settings/worker-token/reset'),
 
   // 账户
+  authStatus: () => get<AuthStatus>('/api/auth/status'),
+  setupPassword: (password: string) => post<unknown>('/api/auth/setup', { password }),
   changePassword: (current: string, next: string) =>
     post<unknown>('/api/auth/password', { current_password: current, new_password: next }),
   logout: () => post<unknown>('/api/auth/logout'),

@@ -1,0 +1,23 @@
+[package]
+name = "videoturbo"
+# 与 src/video_turbo/__init__.py 的 __version__ 保持一致（tests/test_desktop.py 检查）。
+version = "0.1.0"
+description = "VideoTurbo"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+shell-core = { path = "../../crates/shell-core" }
+getrandom = "0.3"
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
+tauri-plugin-autostart = "2.7"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2.7"
+tauri-plugin-single-instance = "2.5"

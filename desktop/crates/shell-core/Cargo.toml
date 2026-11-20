@@ -1,0 +1,13 @@
+[package]
+name = "shell-core"
+version = "0.1.0"
+description = "VideoTurbo 桌面版外壳的共用部分"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sys-locale.workspace = true

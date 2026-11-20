@@ -13,6 +13,11 @@ Worker 接口（``worker_gateway.WORKER_ROUTES``）不走会话校验，由 ``X-
 - 修改数据的请求必须来自控制台自己的页面（``Sec-Fetch-Site`` / ``Origin``），其他网页即使带着
   会话 Cookie 发起请求也会被拒绝。不带这两个请求头的非浏览器客户端不受影响。
 忘记口令时停止主控，删除 ``runtime_settings`` 中 ``key = 'admin_auth'`` 的记录，再启动后重新设定。
+
+桌面版：外壳每次启动主程序时生成随机令牌（``VIDEO_TURBO_DESKTOP_TOKEN``），应用内窗口打开
+``/api/auth/desktop?token=…`` 即登录，不需要口令。这种会话用每次启动随机生成、只在内存里的密钥签名，
+主程序重启后失效（外壳会带着新令牌重新登录）。局域网里的其他设备仍要口令，而且口令只能在这台电脑上设定，
+避免第一个连上来的设备抢先设定。
 """
 
 from __future__ import annotations
@@ -28,17 +33,23 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ..database import Database
+from ..deployment import is_desktop
+from ..environment import getenv
 from ..i18n import msg
 from ..security import secure_equals
 from .context import app_state
 from .worker_gateway import is_worker_route
 
 SETTING_KEY = "admin_auth"
+DESKTOP_TOKEN_ENV = "VIDEO_TURBO_DESKTOP_TOKEN"
+# 桌面版应用内窗口的会话以此开头，用内存里的密钥签名。
+DESKTOP_PREFIX = "d."
+LOOPBACK = frozenset({"127.0.0.1", "::1"})
 COOKIE_NAME = "jf_session"
 SESSION_SECONDS = 30 * 24 * 3600
 MIN_PASSWORD_LENGTH = 8
@@ -57,6 +68,7 @@ PUBLIC_PATHS = frozenset(
         "/api/auth/setup",
         "/api/auth/login",
         "/api/auth/logout",
+        "/api/auth/desktop",
     }
 )
 
@@ -86,6 +98,8 @@ class AdminAuth:
         record = database.runtime_json(SETTING_KEY)
         self._record: dict[str, str] | None = record if isinstance(record, dict) else None
         self._failures: dict[str, tuple[int, float]] = {}
+        self._desktop_token = (getenv(DESKTOP_TOKEN_ENV) or "").strip()
+        self._desktop_secret = secrets.token_hex(32) if self._desktop_token else ""
 
     @property
     def configured(self) -> bool:
@@ -117,14 +131,31 @@ class AdminAuth:
         expires = int(time.time()) + SESSION_SECONDS
         return f"{expires}.{self._sign(self._record['secret'], expires)}"
 
+    def check_desktop_token(self, token: str) -> bool:
+        return bool(self._desktop_token) and secure_equals(token, self._desktop_token)
+
+    def issue_desktop_token(self) -> str:
+        expires = int(time.time()) + SESSION_SECONDS
+        return f"{DESKTOP_PREFIX}{expires}.{self._sign(self._desktop_secret, expires)}"
+
+    @staticmethod
+    def is_desktop_session(token: str | None) -> bool:
+        return bool(token) and str(token).startswith(DESKTOP_PREFIX)
+
     def verify_token(self, token: str | None) -> bool:
-        record = self._record
-        if record is None or not token:
+        if not token:
+            return False
+        if token.startswith(DESKTOP_PREFIX):
+            secret = self._desktop_secret
+            token = token[len(DESKTOP_PREFIX):]
+        else:
+            secret = self._record["secret"] if self._record is not None else ""
+        if not secret:
             return False
         raw_expires, _, signature = token.partition(".")
         if not raw_expires.isdigit() or int(raw_expires) < time.time():
             return False
-        return hmac.compare_digest(signature, self._sign(record["secret"], int(raw_expires)))
+        return hmac.compare_digest(signature, self._sign(secret, int(raw_expires)))
 
     def blocked(self, client: str) -> bool:
         count, started = self._failures.get(client, (0, 0.0))
@@ -303,16 +334,30 @@ def _client(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
-def _start_session(request: Request, response: Response) -> None:
+def _setup_allowed(request: Request) -> bool:
+    """桌面版只允许在这台电脑上设定口令；Docker 版沿用“首次打开的人设定”。"""
+    return not is_desktop() or _client(request) in LOOPBACK
+
+
+def _start_session(request: Request, response: Response, token: str | None = None) -> None:
     response.set_cookie(
         COOKIE_NAME,
-        _auth(request).issue_token(),
+        token or _auth(request).issue_token(),
         max_age=SESSION_SECONDS,
         httponly=True,
         samesite="lax",
         secure=request.url.scheme == "https",
         path="/",
     )
+
+
+def _renew_session(request: Request, response: Response) -> None:
+    """设定或修改口令后为当前浏览器发放新会话；桌面版应用内窗口保留原来不需要口令的会话。"""
+    current = request.cookies.get(COOKIE_NAME)
+    auth = _auth(request)
+    if auth.is_desktop_session(current) and auth.verify_token(current):
+        return
+    _start_session(request, response)
 
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
@@ -323,21 +368,38 @@ async def login_page() -> HTMLResponse:
 @router.get("/api/auth/status")
 async def auth_status(request: Request) -> dict:
     auth = _auth(request)
+    session = request.cookies.get(COOKIE_NAME)
     return {
         "configured": auth.configured,
-        "authenticated": not ENFORCE or auth.verify_token(request.cookies.get(COOKIE_NAME)),
+        "authenticated": not ENFORCE or auth.verify_token(session),
         "min_password_length": MIN_PASSWORD_LENGTH,
+        "setup_allowed": _setup_allowed(request),
+        # 桌面版应用内窗口：不需要口令，控制台不显示“退出登录”。
+        "desktop_session": auth.is_desktop_session(session) and auth.verify_token(session),
     }
+
+
+@router.get("/api/auth/desktop", include_in_schema=False)
+async def auth_desktop(request: Request, token: str = "") -> Response:
+    """桌面版应用内窗口带着外壳给的令牌打开这里，登录后进入控制台。只接受本机请求。"""
+    auth = _auth(request)
+    if _client(request) not in LOOPBACK or not auth.check_desktop_token(token):
+        raise HTTPException(status_code=403, detail=msg("auth.desktopTokenInvalid"))
+    response = RedirectResponse("/", status_code=303, headers={"Cache-Control": "no-store"})
+    _start_session(request, response, auth.issue_desktop_token())
+    return response
 
 
 @router.post("/api/auth/setup")
 async def auth_setup(request: Request, response: Response, payload: NewPasswordPayload) -> dict:
     auth = _auth(request)
+    if not _setup_allowed(request):
+        raise HTTPException(status_code=403, detail=msg("auth.setupLocalOnly"))
     async with app_state(request).admin_auth_lock:
         if auth.configured:
             raise HTTPException(status_code=409, detail=msg("auth.alreadySet"))
         await asyncio.to_thread(auth.set_password, payload.password)
-    _start_session(request, response)
+    _renew_session(request, response)
     return {"ok": True}
 
 
@@ -378,5 +440,5 @@ async def auth_change_password(
         auth.clear_failures(client)
         await asyncio.to_thread(auth.set_password, payload.new_password)
     # 签名密钥已更换，其他设备的会话失效；为当前浏览器重新发放。
-    _start_session(request, response)
+    _renew_session(request, response)
     return {"ok": True}

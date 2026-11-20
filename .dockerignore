@@ -25,3 +25,7 @@ work/
 # 控制台前端在镜像构建阶段重新生成，不使用本机的依赖和产物。
 web/node_modules
 src/video_turbo/orchestrator/static/dashboard
+
+# 桌面版外壳不进镜像；构建产物很大，不要传给 Docker。
+desktop
+deploy/desktop
