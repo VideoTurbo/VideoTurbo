@@ -4,7 +4,7 @@
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Fvideoturbo%2Fvideoturbo-2496ED?logo=docker&logoColor=white)](https://github.com/VideoTurbo/VideoTurbo/pkgs/container/videoturbo)
 [![CI](https://github.com/VideoTurbo/VideoTurbo/actions/workflows/ci.yml/badge.svg)](https://github.com/VideoTurbo/VideoTurbo/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![License](https://img.shields.io/github/license/VideoTurbo/VideoTurbo)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
 简体中文 | [English](README.en.md) | **[官网文档](https://videoturbo.github.io/)**
 
