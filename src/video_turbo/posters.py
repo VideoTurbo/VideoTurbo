@@ -22,6 +22,7 @@ from pathlib import Path
 
 from .media_sources.base import MediaSource, SourceEntry
 from .media_sources.local import LocalSource
+from .source_paths import text as path_text
 
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp")
 THUMBNAIL_WIDTH = 240
@@ -30,7 +31,7 @@ _URL = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
 
 def _directory_entries(source: MediaSource, directory: Path) -> list[SourceEntry]:
     try:
-        return [entry for entry in source.list_dir(str(directory)) if not entry.name.startswith(".")]
+        return [entry for entry in source.list_dir(path_text(directory)) if not entry.name.startswith(".")]
     except OSError:
         return []
 
@@ -77,7 +78,7 @@ def _resolve_nfo_path(source: MediaSource, value: str, nfo: Path) -> Path | None
     if candidate.suffix.lower() not in IMAGE_EXTENSIONS:
         return None
     try:
-        return candidate if source.is_file(str(candidate)) else None
+        return candidate if source.is_file(path_text(candidate)) else None
     except OSError:
         return None
 
@@ -126,7 +127,7 @@ def find_poster(
             continue
         nfo = directory / entry.name
         try:
-            text = source.read_bytes(str(nfo), limit=1024 * 1024).decode("utf-8", errors="replace")
+            text = source.read_bytes(path_text(nfo), limit=1024 * 1024).decode("utf-8", errors="replace")
         except (OSError, ValueError):
             continue
         for value in _nfo_candidates(text):

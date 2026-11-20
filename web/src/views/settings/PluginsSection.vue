@@ -15,7 +15,7 @@ import PluginConfirmDialog, { type PluginConfirm } from './PluginConfirmDialog.v
 import PluginSettingsDialog from './PluginSettingsDialog.vue'
 import { shortDate } from '@/lib/format'
 import { instancesAt, refreshInstances } from '@/stores/cloud'
-import { refreshStatus } from '@/stores/status'
+import { isDesktop, refreshStatus } from '@/stores/status'
 import { t } from '@/i18n'
 
 const list = ref<PluginList | null>(null)
@@ -304,7 +304,7 @@ async function installFromRepository({ plugin, repository }: CatalogItem): Promi
         </button>
       </div>
     </div>
-    <div v-if="list?.safe_mode" class="warning bad">{{ t('plugins.safeMode') }}</div>
+    <div v-if="list?.safe_mode" class="warning bad">{{ t(isDesktop ? 'plugins.safeMode.desktop' : 'plugins.safeMode') }}</div>
 
     <template v-if="tab === 'installed'">
       <p class="lead">{{ t('plugins.lead') }}</p>

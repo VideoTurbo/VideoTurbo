@@ -18,7 +18,7 @@ import { nextSort, type Sort, type SortColumn } from '@/lib/jobs'
 import { debounced, PAGE_SIZE, useLiveReload } from '@/lib/list'
 import { restoreActionNames } from '@/lib/restore'
 import { DEFAULT_VIEW, emptyText as viewEmptyText } from '@/lib/status'
-import { showPosters } from '@/stores/status'
+import { isDesktop, showPosters } from '@/stores/status'
 import RestoreDetailDrawer from './RestoreDetailDrawer.vue'
 import RestoreDialog from './RestoreDialog.vue'
 import RestoreStatusCell from './RestoreStatusCell.vue'
@@ -80,7 +80,7 @@ const warnings = computed(() => {
   const list: Warning[] = []
   const timeout = s.heartbeat_timeout_seconds || 90
   const alive = <T extends { last_seen_at: string }>(workers: T[] = []) => workers.filter((worker) => secondsSince(worker.last_seen_at) <= timeout)
-  if (!s.enabled) list.push({ message: t('restore.noBackup') })
+  if (!s.enabled) list.push({ message: t(isDesktop.value ? 'restore.noBackup.desktop' : 'restore.noBackup') })
   if (!alive(s.workers).length) list.push({ message: t('restore.noMachine'), target: 'compute' })
   const unavailable = alive(s.unavailable_workers)
   if (unavailable.length) list.push({ message: t('restore.jasnaFailed', { names: unavailable.map((worker) => worker.name).join(t('common.listSeparator')), reason: unavailable[0]!.reason }), target: 'compute' })

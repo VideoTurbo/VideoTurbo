@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import logging
 import sys
+import threading
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +18,7 @@ from .. import __version__
 from ..config import ServerConfig, deployment_settings
 from ..config_store import ConfigStore
 from ..database import Database
+from ..deployment import deployment, is_desktop
 from ..environment import getenv
 from ..i18n import LocalizedFormatter, msg
 from ..migrations import SchemaError
@@ -50,6 +53,9 @@ from .worker_gateway import WorkerGateway
 
 logger = logging.getLogger(__name__)
 WORKER_CLEANUP_SECONDS = 60
+# 设为 1 时，标准输入关闭即有序退出。桌面版外壳退出（包括崩溃）时管道随之关闭，主程序不会留在后台；
+# Windows 没有可用的终止信号，也靠它有序退出。容器里标准输入通常一开始就是关闭的，所以默认不开启。
+EXIT_ON_STDIN_CLOSE_ENV = "VIDEO_TURBO_EXIT_ON_STDIN_CLOSE"
 
 
 def _paths() -> tuple[Path, Path]:
@@ -162,7 +168,7 @@ def _report_plugin_load(notices: NoticeService, failures: list[tuple[str, str]])
             notices.notify(
                 "warning",
                 msg("notice.plugins.safeModeTitle"),
-                msg("notice.plugins.safeMode", plugins=[plugin_id for plugin_id, _ in failures], variable=plugin_installer.SAFE_MODE_ENV),
+                msg("notice.plugins.safeMode.desktop" if is_desktop() else "notice.plugins.safeMode", plugins=[plugin_id for plugin_id, _ in failures], variable=plugin_installer.SAFE_MODE_ENV),
             )
         return
     for plugin_id, reason in failures:
@@ -216,7 +222,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_worker_cleanup_loop(app)),
     ]
     # 云 Worker 经 SSH 反向隧道连回本机的 Worker 专用端口，不需要公网地址。
-    host = config.server.host
+    host = config.server.worker_listen_host
     app.state.cloud_tunnels = TunnelManager(
         app.state.cloud,
         database,
@@ -313,6 +319,7 @@ async def status(request: Request) -> dict:
     return {
         **stored,
         "version": __version__,
+        "deployment": deployment(),
         "scan_status": orchestrator.scan_status,
         "manual_scan_enabled": config.scan.manual_scan_enabled,
         "media_libraries": [
@@ -343,6 +350,17 @@ def read_notices(request: Request) -> dict:
     return app_state(request).database.notice_summary()
 
 
+def _watch_stdin(stream, loop: asyncio.AbstractEventLoop, stop: Callable[[], None]) -> None:
+    """读到标准输入结束（对方关闭管道）后，在事件循环里调用 stop。内容一律丢弃。"""
+    try:
+        while stream is not None and stream.read(1024):
+            pass
+    except (OSError, ValueError):
+        pass
+    logger.info("标准输入已关闭，主程序退出。")
+    loop.call_soon_threadsafe(stop)
+
+
 async def _serve(server: ServerConfig) -> None:
     import uvicorn
 
@@ -363,7 +381,7 @@ async def _serve(server: ServerConfig) -> None:
         uvicorn.Server(
             uvicorn.Config(
                 WorkerGateway(app),
-                host=server.host,
+                host=server.worker_listen_host,
                 port=server.worker_port,
                 log_level=log_level,
                 lifespan="off",
@@ -373,11 +391,23 @@ async def _serve(server: ServerConfig) -> None:
             )
         ),
     ]
+
+    def stop() -> None:
+        for item in servers:
+            item.should_exit = True
+
+    if getenv(EXIT_ON_STDIN_CLOSE_ENV) == "1":
+        stream = sys.stdin.buffer if sys.stdin is not None else None
+        threading.Thread(
+            target=_watch_stdin,
+            args=(stream, asyncio.get_running_loop(), stop),
+            name="stdin-watch",
+            daemon=True,
+        ).start()
     tasks = [asyncio.create_task(item.serve()) for item in servers]
     # 每个 uvicorn 实例都会接管信号，只有最后一个能收到；任一结束时通知其余一起退出。
     await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-    for item in servers:
-        item.should_exit = True
+    stop()
     await asyncio.gather(*tasks, return_exceptions=True)
 
 

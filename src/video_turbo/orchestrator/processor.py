@@ -38,6 +38,7 @@ from ..media_sources.base import MediaInput, MediaSource
 from ..models import AsrResult, Cue, JobState, SourceKind, WhisperJavProgress, utc_now_iso
 from ..naming import job_dir as cache_job_dir
 from ..security import sha256_file
+from ..source_paths import text as path_text
 from ..subtitles import (
     parse_srt,
     render_srt,
@@ -98,12 +99,12 @@ def job_pair(job: dict[str, Any]) -> LanguagePair:
 
 def media_target(source: MediaSource, path: str | Path) -> Path | MediaInput:
     """ffprobe / ffmpeg 的输入：本地来源直接用路径，网盘来源用地址和请求头。"""
-    return source.media_input(str(path)) if source.remote else Path(str(path))
+    return source.media_input(path_text(path)) if source.remote else Path(str(path))
 
 
 def source_subtitle_files(source: MediaSource, directory: Path) -> list[Path]:
     try:
-        return subtitle_files_in(source.list_dir(str(directory)))
+        return subtitle_files_in(source.list_dir(path_text(directory)))
     except FileNotFoundError:
         return []
 
@@ -241,7 +242,7 @@ class Orchestrator:
             job_id,
             JobState.ASR_COMPLETED,
             fields={
-                "source_result_path": str(path),
+                "source_result_path": path_text(path),
                 "asr_duration_seconds": result.duration_seconds,
                 "lease_owner": None,
                 "lease_expires_at": None,
@@ -316,10 +317,10 @@ class Orchestrator:
             published_subtitle = output_subtitle_path(
                 Path(str(item["media_path"])), str(item["target_language"]), self.config.subtitles
             )
-            item["published_subtitle_path"] = str(published_subtitle)
+            item["published_subtitle_path"] = path_text(published_subtitle)
             # 网盘媒体库不在列表里逐个请求网盘，按本任务发布的记录判断。
             item["published_subtitle_exists"] = (
-                item.get("subtitle_path") == str(published_subtitle)
+                item.get("subtitle_path") == path_text(published_subtitle)
                 if library is not None and not library.is_local
                 else published_subtitle.is_file()
             )
@@ -379,7 +380,7 @@ class Orchestrator:
                 {
                     "kind": kind,
                     "label": label,
-                    "path": str(path) if path else None,
+                    "path": path_text(path) if path else None,
                     "exists": exists,
                     "size": path.stat().st_size if exists and path else None,
                 }
@@ -486,7 +487,7 @@ class Orchestrator:
         except SourceUnavailable as exc:
             raise ReprocessError(exc.message) from exc
         with source:
-            entry = source.stat(str(video))
+            entry = source.stat(path_text(video))
             if entry is None:
                 raise ReprocessError(msg("jobs.reprocess.videoMissing"))
             probe = self.database.cached_probe(
@@ -500,7 +501,7 @@ class Orchestrator:
             pair=pair,
             source_kind=decision.source_kind,
             stream_index=decision.stream_index,
-            source_path=str(decision.source_path) if decision.source_path else None,
+            source_path=path_text(decision.source_path) if decision.source_path else None,
         )
 
     def reprocess_job(self, job_id: str, mode: str) -> JobState | None:
@@ -845,7 +846,7 @@ class Orchestrator:
                         media_id=media_id,
                         source_kind=decision.source_kind,
                         source_stream_index=decision.stream_index,
-                        source_path=str(decision.source_path) if decision.source_path else None,
+                        source_path=path_text(decision.source_path) if decision.source_path else None,
                         changed=changed,
                         pair=pair,
                     )
@@ -879,7 +880,7 @@ class Orchestrator:
             outcome=outcome,
             reason=decision.reason,
             pair=pair,
-            subtitle_path=str(output) if outcome == "done" and output in subtitle_files else None,
+            subtitle_path=path_text(output) if outcome == "done" and output in subtitle_files else None,
         ):
             result["completed" if outcome == "done" else "unusable"] += 1
 
@@ -968,7 +969,7 @@ class Orchestrator:
                 job_id,
                 JobState.WAITING_ASR,
                 fields={
-                    "audio_path": str(audio_path),
+                    "audio_path": path_text(audio_path),
                     "audio_sha256": audio_sha256,
                     "fetch_media": 0,
                 },
@@ -987,7 +988,7 @@ class Orchestrator:
             )
         else:
             subtitle = Path(str(job["source_path"]))
-            data = source.read_bytes(str(subtitle))
+            data = source.read_bytes(path_text(subtitle))
             if subtitle.suffix.lower() == ".srt":
                 srt_path.write_bytes(data)
             else:
@@ -1006,7 +1007,7 @@ class Orchestrator:
             encoding="utf-8",
         )
         self.database.set_job_state(
-            job_id, JobState.ASR_COMPLETED, fields={"source_result_path": str(source_result)}
+            job_id, JobState.ASR_COMPLETED, fields={"source_result_path": path_text(source_result)}
         )
 
     async def _validation_duration(self, job: dict) -> float | None:
@@ -1071,7 +1072,7 @@ class Orchestrator:
             job_id,
             JobState.VALIDATING,
             fields={
-                "target_result_path": str(target_path),
+                "target_result_path": path_text(target_path),
                 "translation_stats_json": json.dumps(
                     metrics.model_usage(), ensure_ascii=False
                 ),
@@ -1093,7 +1094,7 @@ class Orchestrator:
         with self.sources.for_library(str(job.get("library_id") or "")) as source:
             await asyncio.to_thread(
                 source.write_bytes,
-                str(output),
+                path_text(output),
                 content.encode("utf-8"),
                 overwrite=self.config.subtitles.overwrite_existing
                 or may_replace_managed_subtitle,
@@ -1101,7 +1102,7 @@ class Orchestrator:
         completed = self.database.set_job_state(
             job_id,
             JobState.COMPLETED,
-            fields={"subtitle_path": str(output), "reprocess_mode": None},
+            fields={"subtitle_path": path_text(output), "reprocess_mode": None},
         )
         if completed:
             self.translation_metrics.pop(job_id, None)
@@ -1196,7 +1197,7 @@ class Orchestrator:
                 job_id,
                 JobState.COMPLETED,
                 error=str(exc),
-                fields={"subtitle_path": str(existing_output), "reprocess_mode": None},
+                fields={"subtitle_path": path_text(existing_output), "reprocess_mode": None},
             )
         except Exception as exc:
             self.database.set_job_state(job_id, JobState.FAILED, error=str(exc))

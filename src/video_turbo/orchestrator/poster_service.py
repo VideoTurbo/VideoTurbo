@@ -19,6 +19,7 @@ from ..config import AppConfig
 from ..database import Database
 from ..media_sources.base import MediaSource
 from ..posters import find_poster, make_thumbnail, thumbnail_name
+from ..source_paths import text as path_text
 from .sources import MediaSources, SourceUnavailable
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ class PosterService:
             elif _fresh(media.get("poster_checked_at"), datetime.now(UTC)):
                 return None
         found = find_poster(Path(path), self.config.scan.video_extensions, source)
-        entry = source.stat(str(found)) if found is not None else None
+        entry = source.stat(path_text(found)) if found is not None else None
         self.database.set_poster_cache(
             media["id"],
             media_path=path,
@@ -156,7 +157,7 @@ class PosterService:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         original = self.cache_dir / f"{target.stem}.original{poster.suffix.lower()}"
         try:
-            original.write_bytes(source.read_bytes(str(poster)))
+            original.write_bytes(source.read_bytes(path_text(poster)))
             if not make_thumbnail(original, target):
                 logger.warning("无法为 %s 生成缩略图。", poster)
                 return None

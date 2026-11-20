@@ -31,6 +31,21 @@ jobs:
       - name: 单元测试
         run: uv run pytest -q
 
+  # 桌面版主程序也跑在 Windows 上：路径写法（盘符、\ 分隔）只有在 Windows 上才测得出来。
+  python-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: 安装 FFmpeg
+        run: choco install ffmpeg -y --no-progress
+      - name: 安装依赖
+        run: uv sync --locked --python 3.11 --extra orchestrator --extra worker --extra dev
+      - name: 单元测试
+        run: uv run pytest -q
+
   web:
     runs-on: ubuntu-latest
     defaults:

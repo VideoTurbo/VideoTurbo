@@ -8,7 +8,7 @@ import MoreMenu from '@/components/MoreMenu.vue'
 import type { MenuItem } from '@/components/menu'
 import { confirm, toast } from '@/lib/feedback'
 import { relativeTime } from '@/lib/format'
-import { refreshStatus, status } from '@/stores/status'
+import { isDesktop, refreshStatus, status } from '@/stores/status'
 import LibraryDialog from './LibraryDialog.vue'
 import { t } from '@/i18n'
 
@@ -115,7 +115,7 @@ function meta(library: MediaLibrary): string {
     <div v-else-if="loaded && !libraries.length" class="library-empty">
       <AppIcon name="folder" />
       <b>{{ t('settings.libraries.addFirst') }}</b>
-      <span>{{ t('settings.libraries.addFirstHelp') }}</span>
+      <span>{{ t(isDesktop ? 'settings.libraries.addFirstHelp.desktop' : 'settings.libraries.addFirstHelp') }}</span>
       <NButton size="small" @click="openDialog(null)">{{ t('settings.libraries.add') }}</NButton>
     </div>
     <div v-else class="library-cards">

@@ -37,6 +37,7 @@ from ..restore import (
     relocated_path,
     upload_temp_path,
 )
+from ..source_paths import text as path_text
 from .chunked_upload import discard as discard_upload
 from .poster_service import attach_poster_urls
 
@@ -104,7 +105,7 @@ class RestoreService:
 
 
     def _ineligible_reason(self, path: Path) -> str | None:
-        key = str(path)
+        key = path_text(path)
         now = time.monotonic()
         cached = self._ineligible_cache.get(key)
         if cached and cached[0] > now:
@@ -226,7 +227,7 @@ class RestoreService:
             if reason is None and not path.is_file():
                 reason = msg("restore.service.rescan")
             if reason:
-                skipped.append({"media_id": media_id, "path": str(path), "reason": reason})
+                skipped.append({"media_id": media_id, "path": path_text(path), "reason": reason})
                 continue
             stat = path.stat()
             # 一部影片只保留一条影片修复记录：上次失败或已取消的任务直接复用。
@@ -246,7 +247,7 @@ class RestoreService:
                     created.append(previous["id"])
                 else:
                     skipped.append(
-                        {"media_id": media_id, "path": str(path), "reason": msg("restore.service.stateChanged")}
+                        {"media_id": media_id, "path": path_text(path), "reason": msg("restore.service.stateChanged")}
                     )
                 continue
             job_id = self.database.create_restore_job(
@@ -260,7 +261,7 @@ class RestoreService:
                 ltx_large_canvas=ltx_large_canvas,
             )
             if job_id is None:
-                skipped.append({"media_id": media_id, "path": str(path), "reason": msg("restore.service.alreadyRunning")})
+                skipped.append({"media_id": media_id, "path": path_text(path), "reason": msg("restore.service.alreadyRunning")})
             else:
                 created.append(job_id)
         return {"created": created, "skipped": skipped}
@@ -277,7 +278,7 @@ class RestoreService:
             job["id"],
             expected_states={RestoreState.FAILED, RestoreState.CANCELLED},
             state=RestoreState.PREPARING,
-            source_path=str(path),
+            source_path=path_text(path),
             source_size=stat.st_size,
             source_mtime_ns=stat.st_mtime_ns,
             source_sha256=None,
@@ -540,8 +541,8 @@ class RestoreService:
             job_id,
             expected_states={RestoreState.FINALIZING},
             state=RestoreState.COMPLETED,
-            output_path=str(result.output_path),
-            backup_path=str(result.backup_path),
+            output_path=path_text(result.output_path),
+            backup_path=path_text(result.backup_path),
             finished_at=utc_now_iso(),
             last_error=None,
             progress_json=json.dumps(

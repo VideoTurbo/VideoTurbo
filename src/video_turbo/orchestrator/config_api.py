@@ -19,6 +19,7 @@ from ..config_store import (
     ConfigStore,
     describe_validation_error,
 )
+from ..deployment import deployment
 from ..i18n import msg
 from ..llm_config import (
     POOL_LABELS,
@@ -92,8 +93,9 @@ async def get_config(request: Request) -> dict:
         "llm": llm.public(),
         "protocols": PROTOCOL_LABELS,
         "pools": POOL_LABELS,
-        # 与容器部署绑定、只能在 docker-compose.yml 中修改的项，控制台只读展示。
+        # 与部署绑定的项（Docker 在 docker-compose.yml、桌面版在托盘菜单中修改），控制台只读展示。
         "deployment": {
+            "kind": deployment(),
             "port": config.server.port,
             "worker_port": config.server.worker_port,
             "restore_backup_dir": str(config.restore.backup_dir) if config.restore.backup_dir else None,

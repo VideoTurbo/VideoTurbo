@@ -26,6 +26,7 @@ from .models import (
     utc_now_iso,
 )
 from .settings_store import PIPELINE_PAUSED_KEY
+from .source_paths import text as path_text
 from .store_base import StoreBase
 
 # 列表排序：接口参数 → SQL。
@@ -144,12 +145,12 @@ class RestoreStoreMixin(StoreBase):
                     probe_json = '{}', updated_at = ?
                 WHERE id = ?
                 """,
-                (str(path), size, mtime_ns, file_key, now, media_id),
+                (path_text(path), size, mtime_ns, file_key, now, media_id),
             )
             if subtitle_path is not None:
                 conn.execute(
                     "UPDATE jobs SET subtitle_path = ?, updated_at = ? WHERE media_id = ?",
-                    (str(subtitle_path), now, media_id),
+                    (path_text(subtitle_path), now, media_id),
                 )
 
 
@@ -194,7 +195,7 @@ class RestoreStoreMixin(StoreBase):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    job_id, media_id, RestoreState.PREPARING, str(source_path), source_size,
+                    job_id, media_id, RestoreState.PREPARING, path_text(source_path), source_size,
                     source_mtime_ns, restoration_model, codec, output_extension,
                     int(ltx_large_canvas and is_ltx_model(restoration_model)), now, now,
                 ),

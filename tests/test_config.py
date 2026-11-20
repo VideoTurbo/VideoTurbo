@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from video_turbo.config import (
     AppConfig,
+    ServerConfig,
     SubtitleConfig,
     TranslationConfig,
     apply_local_preview,
@@ -305,6 +306,19 @@ def test_local_preview_listens_on_localhost_only(monkeypatch: pytest.MonkeyPatch
     # 服务实际监听的地址来自 deployment_settings，本地预览即使设置了 VIDEO_TURBO_HOST 也只听本机。
     monkeypatch.setenv("VIDEO_TURBO_HOST", "0.0.0.0")
     monkeypatch.setenv("VIDEO_TURBO_LOCAL_PREVIEW", "1")
+    monkeypatch.setenv("VIDEO_TURBO_WORKER_HOST", "0.0.0.0")
     assert deployment_settings()["server"]["host"] == "127.0.0.1"
+    assert deployment_settings()["server"]["worker_host"] == "127.0.0.1"
     monkeypatch.delenv("VIDEO_TURBO_LOCAL_PREVIEW")
     assert deployment_settings()["server"]["host"] == "0.0.0.0"
+
+
+def test_worker_port_can_listen_on_its_own_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 桌面版：控制台只听本机，接入端口对局域网开放；不设置时两者相同。
+    monkeypatch.delenv("VIDEO_TURBO_LOCAL_PREVIEW", raising=False)
+    monkeypatch.setenv("VIDEO_TURBO_HOST", "127.0.0.1")
+    monkeypatch.delenv("VIDEO_TURBO_WORKER_HOST", raising=False)
+    assert ServerConfig.model_validate(deployment_settings()["server"]).worker_listen_host == "127.0.0.1"
+    monkeypatch.setenv("VIDEO_TURBO_WORKER_HOST", "0.0.0.0")
+    server = ServerConfig.model_validate(deployment_settings()["server"])
+    assert (server.host, server.worker_listen_host) == ("127.0.0.1", "0.0.0.0")
