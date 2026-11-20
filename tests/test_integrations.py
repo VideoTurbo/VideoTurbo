@@ -321,6 +321,25 @@ async def test_notices_are_pushed_by_level(db: Database) -> None:
     assert len(db.list_notices()) == 2
 
 
+async def test_close_finishes_even_if_a_send_swallows_cancellation(db: Database) -> None:
+    # Python 3.11 的 asyncio.wait_for 在推送恰好完成时会吞掉取消；关闭时推送循环不能因此回到队列上一直等。
+    notices = NoticeService(db)
+    started = asyncio.Event()
+
+    async def deliver_one(notice) -> None:
+        started.set()
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            pass  # 模拟被吞掉的取消
+
+    notices.deliver_one = deliver_one  # type: ignore[method-assign]
+    notices.start()
+    notices.notify("info", "标题", "内容")
+    await asyncio.wait_for(started.wait(), 2)
+    await asyncio.wait_for(notices.close(), 2)
+
+
 async def test_notice_push_failure_is_recorded_without_new_notice(db: Database) -> None:
     connection = _add(db, "notifier", "webhook", {"url": "https://a.example/hook"}, min_level="info")
     notices = NoticeService(db, transport=Recorder({"POST /hook": 500}).transport)

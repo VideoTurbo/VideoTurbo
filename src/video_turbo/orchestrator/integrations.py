@@ -71,13 +71,18 @@ class NoticeService:
         self._queue: asyncio.Queue[Notice] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._task: asyncio.Task[None] | None = None
+        self._closing = False
 
     def start(self) -> None:
+        self._closing = False
         self._loop = asyncio.get_running_loop()
         self._queue = asyncio.Queue(QUEUE_LIMIT)
         self._task = asyncio.create_task(self._run())
 
     async def close(self) -> None:
+        # 先标记再取消：Python 3.11 的 asyncio.wait_for 在推送恰好完成时会吞掉取消（3.12 修复），
+        # 推送循环随后看到标记自行结束，不会回到队列上一直等。
+        self._closing = True
         if self._task:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
@@ -121,7 +126,7 @@ class NoticeService:
 
     async def _run(self) -> None:
         assert self._queue is not None
-        while True:
+        while not self._closing:
             notice = await self._queue.get()
             await self.deliver_one(notice)
 
@@ -164,11 +169,12 @@ class MediaRefresher:
         self.settings = PluginSettings(database)
         self.status = ConnectionStatus()
         self._pending = False
+        self._closing = False
         self._task: asyncio.Task[None] | None = None
 
     def request(self) -> None:
         """请求刷新全部已启用的媒体服务器，立即返回。"""
-        if not self.enabled or not self.connections.active():
+        if self._closing or not self.enabled or not self.connections.active():
             return
         self._pending = True
         if self._task is None or self._task.done():
@@ -181,6 +187,8 @@ class MediaRefresher:
 
     async def refresh_all(self) -> None:
         for connection_id, record, plugin in self.connections.active():
+            if self._closing:
+                return
             name = record.get("name") or plugin.label
             try:
                 async with plugin(
@@ -205,6 +213,9 @@ class MediaRefresher:
                 self.status.ok(connection_id)
 
     async def close(self) -> None:
+        # 同 NoticeService.close：取消可能被 wait_for 吞掉，标记保证刷新循环随后结束。
+        self._closing = True
+        self._pending = False
         if self._task:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
