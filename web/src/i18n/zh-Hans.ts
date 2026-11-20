@@ -440,7 +440,7 @@ export default {
   'compute.launch.keepConfig': "沿用云主机原有的 GPU 配置和计费方式。",
   'compute.launch.targetGone': "这台云主机已不在可开机列表中，请刷新后重试",
   'compute.launch.optionsFailed': "读取开机选项失败",
-  'compute.launch.noProvider': "请先在“云平台”里保存支持开机的平台授权",
+  'compute.launch.noProvider': "请先在“云平台”里添加平台授权或 SSH 机器",
   'compute.launch.waitOptions': "请等待开机选项加载成功后再提交",
   'compute.launch.selectTarget': "请选择{target}",
   'compute.launch.selectGpu': "请选择 GPU 型号",

@@ -442,7 +442,7 @@ const en: Messages = {
   'compute.launch.keepConfig': "Use the cloud host's existing GPU configuration and billing.",
   'compute.launch.targetGone': "This cloud host is no longer available to start; refresh and try again",
   'compute.launch.optionsFailed': "Failed to load start options",
-  'compute.launch.noProvider': "Save a platform login that supports starting hosts under “Cloud platform” first",
+  'compute.launch.noProvider': "Add a platform login or an SSH machine under “Cloud platform” first",
   'compute.launch.waitOptions': "Wait until the start options have loaded",
   'compute.launch.selectTarget': "Select {target}",
   'compute.launch.selectGpu': "Select a GPU model",
