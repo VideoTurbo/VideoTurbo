@@ -6,7 +6,22 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # CUDA libraries must match the GPU driver / CUDA version; upgrade them deliberately, not on a schedule.
+      - dependency-name: "nvidia-*"
     groups:
+      # Dependencies exported to deploy/worker/requirements/*.txt. Their PRs fail the requirements check until
+      # someone checks out the branch, runs `uv run python tools/export_requirements.py`, and pushes the result.
+      python-worker:
+        patterns:
+          - "pydantic"
+          - "pyyaml"
+          - "faster-whisper"
+          - "ctranslate2"
+          - "httpx"
+          - "psutil"
+        update-types: [minor, patch]
+      # Orchestrator-only and dev dependencies; these PRs pass CI without manual steps.
       python-minor:
         update-types: [minor, patch]
 
@@ -14,6 +29,13 @@ updates:
     directory: /web
     schedule:
       interval: weekly
+    ignore:
+      # vue-tsc does not support TypeScript 7 yet (it imports typescript/lib/tsc, which TS 7 no longer exports).
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # vue-tsc 3.3 reports false `.value` errors on `v-model:value` in templates; stay on 3.2.x until fixed upstream.
+      - dependency-name: "vue-tsc"
+        update-types: ["version-update:semver-minor"]
     groups:
       web-minor:
         update-types: [minor, patch]
