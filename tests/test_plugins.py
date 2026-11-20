@@ -841,6 +841,22 @@ def test_icon_uri_rejects_unsafe_svg() -> None:
     assert icon_uri("data:image/svg+xml;base64," + encoded) == ""
 
 
+def test_svg_icon_check_is_not_slowed_by_crafted_comments() -> None:
+    import time
+
+    from video_turbo.plugins.base import icon_from_bytes
+
+    assert icon_from_bytes(b'<?xml version="1.0"?>\n<!-- a --> <!-- b -- c --><svg/>').startswith(
+        "data:image/svg+xml;base64,"
+    )
+    # 修复前，这段输入的回溯次数随重复次数指数增长（25 次约 5 秒，每多一次翻倍）。
+    crafted = b"<!--" + b"--><!--" * 25
+    started = time.perf_counter()
+    with pytest.raises(ValueError):
+        icon_from_bytes(crafted)
+    assert time.perf_counter() - started < 0.5
+
+
 @pytest.mark.anyio
 async def test_install_accepts_plugins_within_supported_api_range(
     db: Database, monkeypatch: pytest.MonkeyPatch
