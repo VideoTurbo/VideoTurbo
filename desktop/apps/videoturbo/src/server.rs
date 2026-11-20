@@ -95,6 +95,8 @@ pub fn server_env(
         ("VIDEO_TURBO_BUNDLE_ROOT".into(), paths.resources.join("worker-bundle").into()),
         ("PATH".into(), path_env(&paths.resources.join("ffmpeg"))),
         ("PYTHONUNBUFFERED".into(), "1".into()),
+        // 读写文件统一用 UTF-8，不受 Windows 系统代码页影响（Windows CI 也这样运行测试）。
+        ("PYTHONUTF8".into(), "1".into()),
     ];
     if std::env::var_os("VIDEO_TURBO_LANGUAGE").is_none() {
         env.push(("VIDEO_TURBO_LANGUAGE".into(), language.into()));
