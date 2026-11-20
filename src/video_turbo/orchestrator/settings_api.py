@@ -7,15 +7,20 @@ import logging
 
 from fastapi import (
     APIRouter,
+    HTTPException,
     Request,
 )
+from pydantic import BaseModel, Field
 
+from .. import connection_string
+from ..deployment import deployment
 from ..models import (
     AsrSettings,
     TransferSettings,
     UiSettings,
 )
 from .context import app_state
+from .network import lan_addresses
 from .rate_limit import limit_bytes
 
 logger = logging.getLogger(__name__)
@@ -69,3 +74,29 @@ def reset_worker_token(request: Request) -> dict:
     app_state(request).worker_token = token
     logger.warning("接入密钥已在控制台重置，使用旧密钥的机器需要更新配置。")
     return {"token": token}
+
+
+class ConnectionRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=300)
+
+
+@router.get("/api/settings/worker-connection")
+async def worker_connection_options(request: Request) -> dict:
+    """“添加显卡电脑”的候选接入地址。Docker 里的网卡地址是容器内部的，不提供，由控制台按访问地址补上。"""
+    kind = deployment()
+    addresses = [] if kind == "docker" else await asyncio.to_thread(lan_addresses)
+    return {
+        "worker_port": app_state(request).config.server.worker_port,
+        "addresses": addresses,
+        "deployment": kind,
+    }
+
+
+@router.post("/api/settings/worker-connection")
+def create_worker_connection(request: Request, payload: ConnectionRequest) -> dict:
+    """按选定的接入地址生成接入串（含接入密钥）。"""
+    try:
+        code = connection_string.encode(payload.url, app_state(request).worker_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"code": code}

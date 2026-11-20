@@ -727,6 +727,13 @@ export interface TranslationStatus {
   fallback_upstreams?: Upstream[]
 }
 
+/** “添加显卡电脑”的候选接入地址（Docker 里不提供网卡地址）。 */
+export interface WorkerConnectionOptions {
+  worker_port: number
+  addresses: string[]
+  deployment: Deployment
+}
+
 /** 管理口令与当前会话。 */
 export interface AuthStatus {
   configured: boolean

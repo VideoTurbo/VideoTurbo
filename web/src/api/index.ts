@@ -4,7 +4,7 @@ import type {
   AppConfig, AsrSettings, AuthStatus, BatchResult, CloudInstanceGroup, CloudOrphanProfile, CloudProvider, CloudProviderType,
   CloudSettings, ConfigValues, ConnectionKind, ConnectionPayload, JobDetail, JobPage, Launch, LaunchOptions, LaunchPayload, LaunchTarget,
   FieldValue, FolderPage, LibraryPayload, MediaLibrary, MediaSourceOption, NodePayload, Notice, NoticeSummary, PluginConnection, PluginList, PluginPreview, PluginRepository, PluginResult, PluginSettingsInfo, PluginType, PluginUpdateCheck, RestoreAction, RestoreMediaPage,
-  RestoreStatus, ShutdownMode, Status, UiSettings,
+  RestoreStatus, ShutdownMode, Status, UiSettings, WorkerConnectionOptions,
 } from './types'
 
 export * from './types'
@@ -81,6 +81,8 @@ export const api = {
     put<CloudSettings>('/api/settings/cloud', body),
   clearJasnaLicense: () => del<CloudSettings>('/api/settings/cloud/jasna-license'),
   workerToken: () => get<{ token: string }>('/api/settings/worker-token'),
+  workerConnection: () => get<WorkerConnectionOptions>('/api/settings/worker-connection'),
+  createWorkerConnection: (url: string) => post<{ code: string }>('/api/settings/worker-connection', { url }),
   resetWorkerToken: () => post<{ token: string }>('/api/settings/worker-token/reset'),
 
   // 账户
