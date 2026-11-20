@@ -14,4 +14,4 @@
 - [ ] Database schema or stored settings changed → a new entry appended to `MIGRATIONS` in `src/video_turbo/migrations.py`
 - [ ] Main app ↔ GPU PC API changed → `WORKER_PROTOCOL_VERSION` bumped in `src/video_turbo/protocol.py`
 - [ ] Plugin interface (`*/base.py`) changed → `PLUGIN_API_VERSION` / `PLUGIN_API_MIN_VERSION` updated
-- [ ] README.md and README.en.md updated if user-facing behavior changed
+- [ ] Documentation site (VideoTurbo/videoturbo.github.io) updated if user-facing behavior changed

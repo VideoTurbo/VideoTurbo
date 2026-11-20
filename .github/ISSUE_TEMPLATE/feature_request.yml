@@ -19,7 +19,7 @@ body:
     id: alternatives
     attributes:
       label: Alternatives considered
-      description: Including whether this could be built as a plugin instead (see the Plugins section of the README).
+      description: Including whether this could be built as a plugin instead (see https://videoturbo.github.io/en/features/plugins/).
   - type: input
     id: version
     attributes:

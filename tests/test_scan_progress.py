@@ -583,7 +583,9 @@ def test_audio_duration_allows_valid_asr_cues_past_bad_container_duration(
 def test_scan_can_be_cancelled_midway(tmp_path: Path, monkeypatch) -> None:
     media_root = tmp_path / "media"
     media_root.mkdir()
-    for name in ("a.mkv", "b.mkv", "c.mkv"):
+    # 文件名不能命中内嵌字幕规则：例如「c.mkv」会按带中字的影片直接跳过、不调用 ffprobe。Linux 上目录遍历
+    # 顺序不固定，它排在第一个时本测试会多扫一部影片。
+    for name in ("first.mkv", "second.mkv", "third.mkv"):
         (media_root / name).write_bytes(b"movie")
     config = AppConfig(
         media_libraries=[MediaLibraryConfig(id="lib-1", name="电影", path=media_root)],

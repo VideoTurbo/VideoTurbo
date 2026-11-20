@@ -198,7 +198,7 @@ MESSAGES: dict[str, str] = {
     "cloud.store.alreadyBound": "This cloud host is already bound to {machine}; unbind it first.",
     "cloud.store.unknownFields": "Unknown fields: {fields}",
     "cloud.modelDirFormat": "The model folder must be an absolute path or start with ~/ or $HOME/.",
-    "cloud.bundleMissing": "The main app is missing the program files used to set up cloud hosts (deploy/worker/linux, tools, config). Update the main app as described in the “Updating” section of the README.",
+    "cloud.bundleMissing": "The main app is missing the program files used to set up cloud hosts (deploy/worker/linux, tools, config). Update the main app as described in the “Updating” page of the documentation: https://videoturbo.github.io/en/guide/update/",
     "launch.labelMessage": "{label}: {message}",
     "launch.stoppedBilling": "Stopped; the cloud host is running and billing, so shut it down from the cloud host list",
     "launch.stopped": "Stopped",

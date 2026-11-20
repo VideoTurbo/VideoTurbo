@@ -93,7 +93,7 @@ Linux 显卡电脑：在项目文件夹中执行
   bash deploy/worker/linux/worker.sh install asr      （装了影片修复时用 install all）
   bash deploy/worker/linux/worker.sh start
 
-主程序和显卡电脑上的服务请一起更新。更多说明见 README.md。
+主程序和显卡电脑上的服务请一起更新。更多说明见官网文档：https://videoturbo.github.io/guide/update/
 """
 
 

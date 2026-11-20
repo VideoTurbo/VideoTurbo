@@ -198,7 +198,7 @@ MESSAGES: dict[str, str] = {
     "cloud.store.alreadyBound": "这台云主机已绑定到 {machine}，请先解除。",
     "cloud.store.unknownFields": "未知字段：{fields}",
     "cloud.modelDirFormat": "模型安装目录需填写绝对路径，或以 ~/、$HOME/ 开头。",
-    "cloud.bundleMissing": "主程序里缺少给云主机安装用的程序文件（deploy/worker/linux、tools、config）。请按 README 的“更新”一节更新主程序。",
+    "cloud.bundleMissing": "主程序里缺少给云主机安装用的程序文件（deploy/worker/linux、tools、config）。请按官网文档的“更新”页面更新主程序：https://videoturbo.github.io/guide/update/",
     "launch.labelMessage": "{label}：{message}",
     "launch.stoppedBilling": "已停止；云主机已开机并在计费，可在云主机列表中关机",
     "launch.stopped": "已停止",
