@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 云主机：已注册的机器和云实例（创建任务并入实例显示）。
-import { NButton } from 'naive-ui'
+import { NButton, NTooltip } from 'naive-ui'
 import { computed, onActivated } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import ViewToggle from '@/components/ViewToggle.vue'
@@ -21,6 +21,8 @@ import { t } from '@/i18n'
 const machineView = useViewMode('machines')
 const workers = computed(() => status.value?.workers || [])
 const machines = computed(() => groupMachines(workers.value, heartbeatTimeout.value))
+/** 没有可创建云主机的平台（含 SSH 机器）时，禁用“创建云主机”。 */
+const canLaunch = computed(() => !!cloud.value?.launch_providers.length)
 const providerCount = computed(() => (cloud.value?.providers_configured ? cloud.value.launch_providers.length : 0))
 
 const summary = computed(() => {
@@ -47,7 +49,13 @@ onActivated(() => {
         <NButton @click="providersOpen = true">
           <template #icon><AppIcon name="cloud" /></template>{{ t('cloud.platform') }}<span v-if="providerCount" class="btn-count" style="margin-left: 6px">{{ providerCount }}</span>
         </NButton>
-        <NButton type="primary" @click="openLaunch()"><template #icon><AppIcon name="plus" /></template>{{ t('compute.create') }}</NButton>
+        <NTooltip :disabled="canLaunch || !cloud">
+          <template #trigger>
+            <!-- 禁用的按钮不响应鼠标，提示挂在外层 span 上。 -->
+            <span><NButton type="primary" :disabled="!canLaunch" @click="openLaunch()"><template #icon><AppIcon name="plus" /></template>{{ t('compute.create') }}</NButton></span>
+          </template>
+          {{ t('compute.launch.noProvider') }}
+        </NTooltip>
       </div>
     </div>
 
