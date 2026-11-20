@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VideoTurbo</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    main { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .box { max-width: 640px; width: 100%; text-align: center; }
+    .logo { width: 72px; height: 72px; border-radius: 18px; }
+    h1 { font-size: 20px; margin: 16px 0 4px; }
+    .spinner {
+      width: 22px; height: 22px; margin: 18px auto 0; border-radius: 50%;
+      border: 3px solid var(--line); border-top-color: var(--accent); animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    pre {
+      text-align: left; white-space: pre-wrap; word-break: break-all; max-height: 240px; overflow: auto;
+      background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px;
+    }
+    .actions { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="box">
+      <img class="logo" src="logo.png" alt="">
+      <h1 id="title"></h1>
+      <div id="waiting">
+        <p class="muted" id="hint"></p>
+        <div class="spinner"></div>
+      </div>
+      <div id="failed" hidden>
+        <p class="bad" id="message"></p>
+        <pre id="detail" hidden></pre>
+        <div class="actions">
+          <button class="primary" id="retry"></button>
+          <button id="logs"></button>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script>
+    const zh = (navigator.language || '').toLowerCase().startsWith('zh')
+    const T = zh
+      ? { starting: '正在启动主程序…', hint: '第一次打开可能要等十几秒。', failed: '主程序没能启动', retry: '重试', logs: '打开日志文件夹', stopped: '主程序已停止' }
+      : { starting: 'Starting the main app…', hint: 'The first launch can take a little while.', failed: "The main app couldn't start", retry: 'Retry', logs: 'Open logs folder', stopped: 'The main app has stopped' }
+    const { invoke } = window.__TAURI__.core
+    const $ = (id) => document.getElementById(id)
+    $('hint').textContent = T.hint
+    $('retry').textContent = T.retry
+    $('logs').textContent = T.logs
+    $('retry').onclick = () => { invoke('restart_server'); show({ phase: 'starting' }) }
+    $('logs').onclick = () => invoke('open_logs')
+
+    function show(state) {
+      const failed = state.phase === 'failed' || state.phase === 'stopped'
+      $('waiting').hidden = failed
+      $('failed').hidden = !failed
+      $('title').textContent = state.phase === 'failed' ? T.failed : state.phase === 'stopped' ? T.stopped : T.starting
+      $('message').textContent = state.message || ''
+      $('detail').textContent = state.detail || ''
+      $('detail').hidden = !state.detail
+    }
+
+    async function poll() {
+      try {
+        const state = await invoke('server_state')
+        if (state.phase === 'running') {
+          location.replace(state.url)
+          return
+        }
+        show(state)
+      } catch (error) {
+        console.error(error)
+      }
+      setTimeout(poll, 400)
+    }
+    show({ phase: 'starting' })
+    poll()
+  </script>
+</body>
+</html>

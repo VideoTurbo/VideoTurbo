@@ -1,0 +1,11 @@
+{
+  "name": "video-turbo-desktop",
+  "private": true,
+  "description": "VideoTurbo 桌面版外壳（Tauri）的命令行工具",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

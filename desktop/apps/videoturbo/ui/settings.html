@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VideoTurbo</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    main { padding: 20px 24px; }
+    section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+    h2 { font-size: 14px; margin: 0 0 10px; }
+    label.field { display: block; margin-bottom: 10px; }
+    label.field > span { display: block; margin-bottom: 4px; }
+    .row { display: flex; gap: 12px; }
+    .row > * { flex: 1; }
+    .check { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
+    .check input { margin-top: 4px; }
+    .help { font-size: 12px; color: var(--muted); margin: 2px 0 0; }
+    .path { display: flex; gap: 8px; }
+    .path button { flex: none; }
+    footer { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+    footer .note { flex: 1; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h2 id="t-ports"></h2>
+      <div class="row">
+        <label class="field"><span id="t-console-port"></span><input type="number" id="console_port" min="1024" max="65535"></label>
+        <label class="field"><span id="t-worker-port"></span><input type="number" id="worker_port" min="1024" max="65535"></label>
+      </div>
+      <p class="help" id="t-worker-help"></p>
+      <label class="check"><input type="checkbox" id="lan_console"><span><span id="t-lan"></span><p class="help" id="t-lan-help"></p></span></label>
+    </section>
+    <section>
+      <h2 id="t-backup"></h2>
+      <div class="path"><input type="text" id="backup_dir"><button id="choose"></button></div>
+      <p class="help" id="t-backup-help"></p>
+    </section>
+    <section>
+      <h2 id="t-trouble"></h2>
+      <label class="check"><input type="checkbox" id="safe_mode"><span><span id="t-safe"></span><p class="help" id="t-safe-help"></p></span></label>
+      <p class="help" id="data-dir"></p>
+    </section>
+    <footer>
+      <span class="note" id="note"></span>
+      <button class="primary" id="save"></button>
+    </footer>
+  </main>
+  <script>
+    const zh = (navigator.language || '').toLowerCase().startsWith('zh')
+    const T = zh ? {
+      ports: '端口', consolePort: '控制台端口', workerPort: '机器接入端口',
+      workerHelp: '其他显卡电脑连接这个端口。不在同一局域网的机器要从外网连接时，只需开放这个端口。',
+      lan: '允许局域网里的其他设备打开控制台', lanHelp: '关闭时只能在这台电脑上打开控制台。开启后可以用手机或其他电脑访问，请务必设置管理口令。',
+      backup: '影片修复原片备份文件夹', choose: '选择…', backupHelp: '留空时使用：{dir}。备份文件夹必须在影片文件夹之外，原片会整份复制过来，请选空间足够的盘。',
+      trouble: '排查问题', safe: '安全模式', safeHelp: '启动时不加载控制台里安装的插件，只能卸载。插件导致主程序出问题时开启，处理完后关闭。',
+      dataDir: '数据文件夹：{dir}', save: '保存并重新启动主程序', saved: '已保存，主程序正在重新启动。', unchanged: '设置没有变化。',
+    } : {
+      ports: 'Ports', consolePort: 'Console port', workerPort: 'Connection port',
+      workerHelp: 'Other GPU computers connect to this port. Machines outside your local network only need this port opened.',
+      lan: 'Allow other devices on the local network to open the console', lanHelp: 'When off, the console only opens on this computer. When on, phones and other computers can open it, so set an admin password.',
+      backup: 'Restoration backup folder', choose: 'Choose…', backupHelp: 'Leave empty to use {dir}. The folder must be outside the video folders; originals are copied in full, so pick a drive with enough space.',
+      trouble: 'Troubleshooting', safe: 'Safe mode', safeHelp: "Don't load plugins installed in the console at startup; they can only be uninstalled. Turn on when a plugin breaks the main app, then turn off.",
+      dataDir: 'Data folder: {dir}', save: 'Save and restart the main app', saved: 'Saved. The main app is restarting.', unchanged: 'Nothing changed.',
+    }
+    const { invoke } = window.__TAURI__.core
+    const $ = (id) => document.getElementById(id)
+    const texts = {
+      't-ports': T.ports, 't-console-port': T.consolePort, 't-worker-port': T.workerPort, 't-worker-help': T.workerHelp,
+      't-lan': T.lan, 't-lan-help': T.lanHelp, 't-backup': T.backup, 'choose': T.choose, 't-trouble': T.trouble,
+      't-safe': T.safe, 't-safe-help': T.safeHelp, 'save': T.save,
+    }
+    for (const [id, text] of Object.entries(texts)) $(id).textContent = text
+    let saved = null
+
+    function current() {
+      return {
+        console_port: Number($('console_port').value),
+        worker_port: Number($('worker_port').value),
+        lan_console: $('lan_console').checked,
+        backup_dir: $('backup_dir').value.trim() || null,
+        safe_mode: $('safe_mode').checked,
+      }
+    }
+
+    async function load() {
+      const view = await invoke('get_settings')
+      const s = view.settings
+      saved = { ...s, backup_dir: s.backup_dir || null }
+      $('console_port').value = s.console_port
+      $('worker_port').value = s.worker_port
+      $('lan_console').checked = s.lan_console
+      $('backup_dir').value = s.backup_dir || ''
+      $('backup_dir').placeholder = view.default_backup_dir
+      $('safe_mode').checked = s.safe_mode
+      $('t-backup-help').textContent = T.backupHelp.replace('{dir}', view.default_backup_dir)
+      $('data-dir').textContent = T.dataDir.replace('{dir}', view.data_dir)
+    }
+
+    $('choose').onclick = async () => {
+      const dir = await window.__TAURI__.dialog.open({ directory: true, multiple: false })
+      if (typeof dir === 'string') $('backup_dir').value = dir
+    }
+    $('save').onclick = async () => {
+      const input = current()
+      if (JSON.stringify(input) === JSON.stringify(saved)) {
+        $('note').className = 'note muted'
+        $('note').textContent = T.unchanged
+        return
+      }
+      $('save').disabled = true
+      try {
+        await invoke('save_settings', { input })
+        saved = input
+        $('note').className = 'note muted'
+        $('note').textContent = T.saved
+      } catch (error) {
+        $('note').className = 'note bad'
+        $('note').textContent = String(error)
+      } finally {
+        $('save').disabled = false
+      }
+    }
+    load()
+  </script>
+</body>
+</html>

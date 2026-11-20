@@ -26,7 +26,8 @@ first.
 | `src/video_turbo/migrations.py` | Database schema versions |
 | `src/video_turbo/protocol.py` | Main app ↔ GPU PC protocol version |
 | `web/` | Dashboard (Vue 3 + TypeScript + Vite + Naive UI); builds into the Python package |
-| `deploy/` | Docker image, compose example and GPU PC install scripts |
+| `deploy/` | Docker image, compose example, GPU PC install scripts and the desktop app's packaging (`deploy/desktop/`) |
+| `desktop/` | Desktop app (Tauri 2): `crates/shell-core` is shared by the desktop apps, `apps/videoturbo` is the main app with its tray, windows and setup pages |
 | `tools/` | Release packaging and GPU PC setup helpers |
 | `tests/` | Python tests; `web/tests/` holds the dashboard tests |
 
@@ -55,15 +56,32 @@ Vite in another terminal (it proxies `/api` to port 8765, override with `VIDEO_T
 npm --prefix web run dev
 ```
 
+### Desktop app
+
+The desktop app starts the packaged main app as a child process and passes everything Docker puts in
+docker-compose.yml as environment variables (see `desktop/apps/videoturbo/src/server.rs`). It needs Rust and Node;
+build it on the platform you package for (Apple silicon macOS or 64-bit Windows):
+
+```bash
+uv sync --extra orchestrator --extra desktop
+uv run python deploy/desktop/build_sidecar.py
+npm --prefix desktop ci
+cd desktop/apps/videoturbo && npx --prefix ../.. tauri build
+```
+
+`build_sidecar.py` writes the packaged main app, FFmpeg and the cloud worker bundle to
+`desktop/apps/videoturbo/resources/`; add `--skip-web` or `--skip-server` to reuse what is already there.
+
 ## Checks
 
 CI runs the same commands; please run them before opening a pull request.
 
 ```bash
-uv run ruff check src tests tools
+uv run ruff check src tests tools deploy/desktop
 uv run pytest -q
 npm --prefix web test
 npm --prefix web run build
+cargo test --manifest-path desktop/Cargo.toml  # if desktop/ changed
 ```
 
 ## Rules that keep upgrades safe
