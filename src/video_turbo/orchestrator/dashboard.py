@@ -12,16 +12,21 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 DIST_DIR = Path(__file__).with_name("static") / "dashboard"
 ASSETS_DIR = DIST_DIR / "assets"
 
+# 与 docs/images/brand/avatar.svg 同一图形：靛蓝渐变底上的斜体 VT 字标和速度线。
+# 图标尺寸很小，这里加了圆角、放大字标，并去掉阴影。
 FAVICON_SVG = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
     '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
-    '<stop offset="0" stop-color="#9097ff"/><stop offset="1" stop-color="#22d3ee"/>'
-    "</linearGradient></defs>"
-    '<rect width="64" height="64" rx="14" fill="#141418"/>'
-    '<path fill="url(#g)" d="M9 54V29l12 8v-8l12 8v-8l12 8V12h10v42z"/>'
-    '<rect x="15" y="44" width="20" height="4" rx="2" fill="#141418"/>'
-    '<rect x="38" y="44" width="10" height="4" rx="2" fill="#141418"/>'
-    "</svg>"
+    '<stop offset="0" stop-color="#3b44b3"/><stop offset=".55" stop-color="#5a63e0"/>'
+    '<stop offset="1" stop-color="#959cff"/></linearGradient></defs>'
+    '<rect width="512" height="512" rx="112" fill="url(#g)"/>'
+    '<g transform="translate(256 256) scale(.84) skewX(-12) translate(-174 -100)" fill="#fff">'
+    '<g stroke="#fff" stroke-linecap="round" stroke-width="22">'
+    '<path d="M-84 36H-26" opacity=".5"/><path d="M-80 100H2" opacity=".75"/>'
+    '<path d="M-14 164H30" opacity=".5"/></g>'
+    '<path d="M0 0H64L110 104L156 0H220L131 200H89Z"/>'
+    '<path d="M238 0H420V58H358V200H298V58H238Z"/>'
+    "</g></svg>"
 )
 
 NOT_BUILT_HTML = (
