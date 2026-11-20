@@ -44,7 +44,7 @@ restore = [
 ]
 dev = [
   "psutil>=5.9,<8",
-  "pytest>=8.4,<9",
+  "pytest>=8.4,<10",
   "ruff>=0.12,<1",
 ]
 
