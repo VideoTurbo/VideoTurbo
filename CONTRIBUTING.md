@@ -81,7 +81,7 @@ npm --prefix web run build
   After changing `pyproject.toml` or `uv.lock` (including Dependabot PRs), run
   `uv run python tools/export_requirements.py` and commit the result; CI fails while the lists are out of date.
 - **Version number:** it lives only in `src/video_turbo/__init__.py`. Releases are cut by pushing a matching `v*` tag.
-- **Docs:** user-facing changes update both `README.md` and `README.en.md`.
+- **Docs:** user-facing changes update the documentation site ([VideoTurbo/videoturbo.github.io](https://github.com/VideoTurbo/videoturbo.github.io)), both the Chinese and English pages. Keep `README.md` and `README.en.md` to the essentials.
 
 ## Commit messages
 
