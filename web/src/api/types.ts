@@ -727,6 +727,17 @@ export interface TranslationStatus {
   fallback_upstreams?: Upstream[]
 }
 
+/** 管理口令与当前会话。 */
+export interface AuthStatus {
+  configured: boolean
+  authenticated: boolean
+  min_password_length: number
+  /** 这台设备能否设定口令：桌面版只能在运行 VideoTurbo 的电脑上设定。 */
+  setup_allowed?: boolean
+  /** 桌面版应用内窗口：不需要口令登录，也不显示“退出登录”。 */
+  desktop_session?: boolean
+}
+
 /** 主控的部署方式：提示文案据此说明设置去哪里改。 */
 export type Deployment = 'docker' | 'desktop' | 'source'
 

@@ -49,6 +49,7 @@ def test_first_visit_requires_setup_then_grants_session(client: TestClient) -> N
     assert client.get("/", headers={"Accept": "text/html"}).status_code == 200
     assert client.get("/api/auth/status").json() == {
         "configured": True, "authenticated": True, "min_password_length": 8,
+        "setup_allowed": True, "desktop_session": False,
     }
     # 已设定后不能再次走首次设定流程覆盖口令。
     assert client.post("/api/auth/setup", json={"password": "another one"}).status_code == 409
@@ -222,3 +223,60 @@ def test_api_docs_are_disabled(client: TestClient) -> None:
     client.post("/api/auth/setup", json={"password": "correct horse"})
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert client.get(path).status_code == 404
+
+
+@pytest.fixture
+def desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """桌面版：外壳给出令牌；返回按客户端地址创建 TestClient 的函数。"""
+    monkeypatch.setenv("VIDEO_TURBO_DEPLOYMENT", "desktop")
+    monkeypatch.setenv(auth.DESKTOP_TOKEN_ENV, "shell-token")
+    prepare_server(tmp_path, monkeypatch, worker_token="worker-secret")
+    monkeypatch.setattr(auth, "ENFORCE", True)
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    monkeypatch.setattr(dashboard, "DIST_DIR", dist)
+
+    def make(host: str) -> TestClient:
+        return TestClient(app, follow_redirects=False, client=(host, 50000))
+
+    return make
+
+
+def test_desktop_window_signs_in_without_password(desktop) -> None:
+    with desktop("127.0.0.1") as local:
+        assert local.get("/api/auth/desktop", params={"token": "wrong"}).status_code == 403
+        response = local.get("/api/auth/desktop", params={"token": "shell-token"})
+        assert response.status_code == 303 and response.headers["location"] == "/"
+        assert local.get("/api/status").status_code == 200
+        status = local.get("/api/auth/status").json()
+        assert status["configured"] is False and status["desktop_session"] is True
+        assert status["setup_allowed"] is True
+        # 在应用内窗口里设定口令（给其他设备用），窗口自己的会话保持不变。
+        setup = local.post("/api/auth/setup", json={"password": "correct horse"})
+        assert setup.status_code == 200 and "set-cookie" not in setup.headers
+        assert local.get("/api/auth/status").json()["desktop_session"] is True
+        assert local.get("/api/status").status_code == 200
+
+
+def test_desktop_password_can_only_be_set_on_this_computer(desktop) -> None:
+    with desktop("192.168.1.20") as remote:
+        # 局域网里的设备拿不到外壳的令牌，也不能抢先设定口令。
+        assert remote.get("/api/auth/desktop", params={"token": "shell-token"}).status_code == 403
+        assert remote.get("/api/auth/status").json()["setup_allowed"] is False
+        assert remote.post("/api/auth/setup", json={"password": "correct horse"}).status_code == 403
+        assert remote.get("/api/status").status_code == 401
+
+
+def test_desktop_sessions_end_when_the_main_app_restarts(desktop) -> None:
+    with desktop("127.0.0.1") as local:
+        local.get("/api/auth/desktop", params={"token": "shell-token"})
+        cookie = local.cookies.get(auth.COOKIE_NAME)
+    assert cookie and cookie.startswith(auth.DESKTOP_PREFIX)
+    with desktop("127.0.0.1") as restarted:
+        restarted.cookies.set(auth.COOKIE_NAME, cookie)
+        assert restarted.get("/api/status").status_code == 401
+
+
+def test_desktop_login_is_off_without_a_shell_token(client: TestClient) -> None:
+    assert client.get("/api/auth/desktop", params={"token": ""}).status_code == 403

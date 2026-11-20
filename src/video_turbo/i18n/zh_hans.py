@@ -385,6 +385,8 @@ MESSAGES: dict[str, str] = {
     "auth.loginFirst": "请先登录。",
     "auth.alreadySet": "管理口令已经设定，请直接登录。",
     "auth.notSet": "尚未设定管理口令。",
+    "auth.setupLocalOnly": "还没有设定管理口令。请先在运行 VideoTurbo 的电脑上打开控制台，在“设置 → 账户”里设定，再从这台设备登录。",
+    "auth.desktopTokenInvalid": "登录链接已失效，请从 VideoTurbo 的托盘菜单重新打开控制台。",
     "auth.tooMany": "尝试次数过多，请 5 分钟后再试。",
     "auth.wrong": "口令不正确。",
     "auth.wrongCurrent": "当前口令不正确。",
