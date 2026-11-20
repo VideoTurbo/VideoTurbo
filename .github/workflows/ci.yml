@@ -38,6 +38,8 @@ jobs:
     env:
       # 与桌面版一致：外壳以 UTF-8 模式启动主程序，读写文件不受系统代码页影响。
       PYTHONUTF8: "1"
+      # 测试超过 60 秒未结束时打印协程停在哪里（见 tests/conftest.py）。
+      VIDEO_TURBO_TEST_DUMP_AFTER: "60"
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
