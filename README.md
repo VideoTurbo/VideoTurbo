@@ -16,20 +16,25 @@ Emby / Jellyfin 刷新后就能直接选用。
 ## 功能
 
 - **自动生成字幕**：日语、英语、韩语影片 → 简体中文、繁体中文、英语等，已有字幕的影片自动跳过或只翻译。
-- **主程序 + 显卡电脑**：主程序用 Docker 装在 NAS 上，语音识别交给有 NVIDIA 显卡的 Windows / Linux 电脑。
+- **主程序 + 显卡电脑**：主程序装在 NAS（Docker）或 Windows / Mac 电脑（桌面版）上，语音识别交给有 NVIDIA 显卡的 Windows / Linux 电脑；
+  装桌面版的 Windows 电脑有 NVIDIA 显卡时，自己就能识别。
 - **多台机器一起干活**：家里的电脑和按需租用的云 GPU 都能接入，任务自动分配，云主机跑完自动关机。
 - **可选功能**：AI 影片修复、网盘媒体库、Emby / Jellyfin 自动刷新、Webhook 推送，以及插件扩展。
 
 ## 快速开始
 
-从 [Releases](https://github.com/VideoTurbo/VideoTurbo/releases/latest) 下载 `docker-compose.example.yml`，改名为
+**桌面版**（Windows / Mac）：从 [Releases](https://github.com/VideoTurbo/VideoTurbo/releases/latest) 下载安装包——
+Windows 用 `VideoTurbo_<版本>_x64-setup.exe`，Mac（Apple 芯片）用 `VideoTurbo_<版本>_aarch64.dmg`，安装后打开即可，
+控制台窗口不需要口令。另一台有 NVIDIA 显卡的 Windows 电脑装 `VideoTurbo-Worker_<版本>_x64-setup.exe`，粘贴控制台给出的接入串就能帮忙识别。
+
+**Docker**（NAS）：从 [Releases](https://github.com/VideoTurbo/VideoTurbo/releases/latest) 下载 `docker-compose.example.yml`，改名为
 `docker-compose.yml`，把里面的 `/path/to/your/media` 改成影片所在的文件夹，然后启动：
 
 ```sh
 docker compose up -d
 ```
 
-浏览器打开 `http://主程序的IP:8765` 设置管理口令。之后的首次设置、显卡电脑安装、常见问题和更新方法见
+浏览器打开 `http://主程序的IP:8765` 设置管理口令。安装说明、之后的首次设置、显卡电脑安装、常见问题和更新方法见
 **[官网文档](https://videoturbo.github.io/guide/introduction/)**。
 
 ## 参与贡献

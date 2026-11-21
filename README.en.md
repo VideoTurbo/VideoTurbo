@@ -16,20 +16,25 @@ into the language you choose and saves an `.srt` next to each video, ready for E
 ## Features
 
 - **Automatic subtitles**: Japanese, English or Korean → Simplified Chinese, Traditional Chinese, English and more; videos that already have subtitles are skipped or only translated.
-- **Main app + GPU PCs**: the main app runs in Docker on a NAS; speech recognition runs on Windows / Linux PCs with an NVIDIA GPU.
+- **Main app + GPU PCs**: the main app runs on a NAS (Docker) or a Windows / Mac computer (desktop app); speech recognition runs on Windows / Linux PCs with an NVIDIA GPU.
+  A Windows computer running the desktop app can also recognize speech itself if it has an NVIDIA GPU.
 - **Several machines at once**: home PCs and on-demand cloud GPUs can all join; jobs are shared out automatically and cloud hosts shut down when they finish.
 - **Optional**: AI video restoration, cloud storage libraries, Emby / Jellyfin refresh, webhook notifications and plugins.
 
 ## Quick start
 
-Download `docker-compose.example.yml` from [Releases](https://github.com/VideoTurbo/VideoTurbo/releases/latest), rename it to
+**Desktop app** (Windows / Mac): download the installer from [Releases](https://github.com/VideoTurbo/VideoTurbo/releases/latest) —
+`VideoTurbo_<version>_x64-setup.exe` for Windows, `VideoTurbo_<version>_aarch64.dmg` for Macs with Apple silicon — and open it after installing;
+the dashboard window needs no password. On another Windows PC with an NVIDIA GPU, install `VideoTurbo-Worker_<version>_x64-setup.exe` and paste the connection code from the dashboard to have it help with recognition.
+
+**Docker** (NAS): download `docker-compose.example.yml` from [Releases](https://github.com/VideoTurbo/VideoTurbo/releases/latest), rename it to
 `docker-compose.yml`, replace `/path/to/your/media` with your video folder and start it:
 
 ```sh
 docker compose up -d
 ```
 
-Open `http://<main-app-ip>:8765` and set an admin password. For first-time setup, GPU PCs, the FAQ and updating, see the
+Open `http://<main-app-ip>:8765` and set an admin password. For installation details, first-time setup, GPU PCs, the FAQ and updating, see the
 **[documentation](https://videoturbo.github.io/en/guide/introduction/)**.
 
 ## Contributing

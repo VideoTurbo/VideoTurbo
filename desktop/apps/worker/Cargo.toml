@@ -1,7 +1,7 @@
 [package]
 name = "videoturbo-worker"
 # 与 src/video_turbo/__init__.py 的 __version__ 保持一致（tests/test_desktop.py 检查）。
-version = "0.1.0"
+version = "0.2.0"
 description = "VideoTurbo Worker"
 edition.workspace = true
 license.workspace = true
