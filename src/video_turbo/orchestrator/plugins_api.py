@@ -409,6 +409,29 @@ async def _run_test(
     return {"ok": True, "message": message}
 
 
+def _connection_types(kind: str) -> list[type]:
+    """可以添加配置的插件。媒体库来源中只有声明了 credential_fields 的（WebDAV、Samba 等）按多份配置添加。"""
+    plugins = list(registry.providers(kind).values())
+    return [plugin for plugin in plugins if kind != "media_source" or plugin.credential_fields]
+
+
+def _test_kwargs(request: Request, plugin: type, values: dict[str, Any]) -> dict[str, Any]:
+    """测试网络存储时的设置：插件设置叠加这份配置的值；不读写已保存的插件状态。"""
+    if not issubclass(plugin, MediaSourcePlugin):
+        return {}
+    return {"settings": {**_settings(request).settings(plugin), **values}, "state": {}}
+
+
+def _check_source_unused(request: Request, connection_id: str) -> None:
+    used = [
+        library.name
+        for library in app_state(request).config.media_libraries
+        if library.source == connection_id
+    ]
+    if used:
+        raise HTTPException(status_code=409, detail=msg("plugins.connection.inUse", libraries=used))
+
+
 def _register_connections(path: str, kind: str, status: str) -> None:
     """为一类插件注册配置接口。status 是 app.state 上保存调用状态的服务名。"""
 
@@ -418,20 +441,23 @@ def _register_connections(path: str, kind: str, status: str) -> None:
     def statuses(request: Request) -> ConnectionStatus:
         return getattr(request.app.state, status).status
 
+    def types() -> list[type]:
+        return _connection_types(kind)
+
     @router.get(f"/api/{path}/types", name=f"{kind}_types")
     def list_types() -> list[dict]:
-        return [plugin.describe() for plugin in registry.providers(kind).values()]
+        return [plugin.describe() for plugin in types()]
 
     @router.post(f"/api/{path}/types/{{plugin_type}}/test", name=f"{kind}_type_test")
     async def test_type(request: Request, plugin_type: str, payload: ConnectionValues) -> dict:
-        plugin = registry.get(kind, plugin_type)
+        plugin = next((item for item in types() if item.id == plugin_type), None)
         if plugin is None:
             raise HTTPException(status_code=404, detail=msg("plugins.api.unknown"))
         try:
             values = plugin.merge_values({}, payload.values)
         except PluginConfigError as exc:
             raise _config_error(exc) from exc
-        return await _run_test(plugin, values, request)
+        return await _run_test(plugin, values, request, **_test_kwargs(request, plugin, values))
 
     @router.get(f"/api/{path}", name=f"{kind}_list")
     def list_connections(request: Request) -> list[dict]:
@@ -463,6 +489,8 @@ def _register_connections(path: str, kind: str, status: str) -> None:
 
     @router.delete(f"/api/{path}/{{connection_id}}", name=f"{kind}_delete")
     def delete_connection(request: Request, connection_id: str) -> dict:
+        if kind == "media_source":
+            _check_source_unused(request, connection_id)
         try:
             connections(request).delete(connection_id)
         except KeyError as exc:
@@ -482,8 +510,9 @@ def _register_connections(path: str, kind: str, status: str) -> None:
             values = plugin.merge_values(saved.get("values") or {}, payload.values)
         except (KeyError, PluginConfigError, PluginCallError) as exc:
             raise _config_error(exc) from exc
-        return await _run_test(plugin, values, request)
+        return await _run_test(plugin, values, request, **_test_kwargs(request, plugin, values))
 
 
 _register_connections("media-servers", "media_server", "media_refresher")
 _register_connections("notifiers", "notifier", "notices")
+_register_connections("media-sources", "media_source", "media_source_status")

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 媒体服务器或通知的配置列表：可以添加多份，各自启用、测试、编辑。操作立即保存，不计入“未保存的更改”。
+// 媒体服务器、通知或网络存储（WebDAV、Samba）的配置列表：可以添加多份，各自启用、测试、编辑。操作立即保存，不计入“未保存的更改”。
 // 所有配置共用的插件设置在“插件”页的插件卡片上设置。
 import { NButton, NInput, NModal, NSelect, NSwitch, type SelectOption } from 'naive-ui'
 import { computed, h, onActivated, onMounted, reactive, ref } from 'vue'
@@ -18,6 +18,7 @@ const props = defineProps<{ kind: ConnectionKind; title: string; lead: string; e
 const nouns: Record<ConnectionKind, { noun: string; example: string; missing: string }> = {
   'media-servers': { noun: t('settings.connections.mediaServer'), example: t('settings.connections.mediaServerPlaceholder'), missing: t('settings.connections.mediaServerMissing') },
   notifiers: { noun: t('settings.connections.notifier'), example: t('settings.connections.notifierPlaceholder'), missing: t('settings.connections.notifierMissing') },
+  'media-sources': { noun: t('settings.connections.storage'), example: t('settings.connections.storagePlaceholder'), missing: t('settings.connections.storageMissing') },
 }
 const noun = computed(() => nouns[props.kind].noun)
 const levelOptions: { value: NoticeMinLevel; label: string }[] = [

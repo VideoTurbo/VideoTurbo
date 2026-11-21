@@ -26,6 +26,7 @@ WORKER_ROUTES: tuple[tuple[frozenset[str], re.Pattern[str]], ...] = tuple(
         ({"POST"}, rf"/api/workers/{_ID}/restore/claim"),
         ({"GET", "HEAD"}, rf"/api/jobs/{_ID}/audio"),
         ({"GET"}, r"/api/worker/plugins/[0-9a-fA-F]{64}"),
+        ({"GET", "HEAD"}, rf"/api/worker/media/{_ID}"),
         ({"GET"}, r"/api/worker/asr-settings"),
         ({"POST"}, rf"/api/jobs/{_ID}/asr-error"),
         ({"POST"}, rf"/api/jobs/{_ID}/asr-result"),

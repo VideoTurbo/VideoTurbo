@@ -38,11 +38,14 @@ from ..plugins.base import PluginInfo, StateCallback
 # - 删改已有接口：PLUGIN_API_VERSION 加一，MIN 改成与它相同，旧插件需要作者更新。
 # 历史：+1 支持 label、description 和字段文字写成 {语言: 文字}（多语言）。
 #       +1 字段支持 visible_when（按其他字段的值显示）。
-PLUGIN_API_VERSION = 4
+#       +1 MediaSource.read_range（GPU 机器直连不了网盘时经主程序中转影片），插件可以覆盖。
+PLUGIN_API_VERSION = 5
 PLUGIN_API_MIN_VERSION = 2
 
 # read_bytes 的默认上限：字幕、nfo 和海报都远小于这个值。
 SMALL_FILE_LIMIT = 16 * 1024 * 1024
+# read_range 每次产出的大小。
+RANGE_CHUNK = 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +131,42 @@ class MediaSource(ABC):
     @abstractmethod
     def media_input(self, path: str) -> MediaInput:
         """主程序运行 ffprobe（扫描时只读文件头）或 ffmpeg 时使用的输入。"""
+
+    def read_range(self, path: str, start: int, end: int) -> Iterator[bytes]:
+        """读取文件第 start 到 end 字节（含两端），分块产出。主程序经它把影片中转给直连不了网盘的 GPU 机器。
+
+        默认用 :meth:`media_input` 的地址加 Range 请求头读取，http 地址的来源不需要覆盖；
+        地址不是 http(s) 的来源（例如 Samba）需要自己实现。
+        """
+        target = self.media_input(path)
+        if not target.url.lower().startswith(("http://", "https://")):
+            raise NotImplementedError(msg("sources.rangeUnsupported"))
+        client = getattr(self, "client", None)
+        owned = client is None
+        client = client or httpx.Client(timeout=60, follow_redirects=False)
+        try:
+            headers = {**target.headers, "Range": f"bytes={start}-{end}"}
+            with client.stream("GET", target.url, headers=headers) as response:
+                if response.status_code == 404:
+                    raise FileNotFoundError(path)
+                response.raise_for_status()
+                # 服务器不支持 Range 时返回整个文件（200），跳过前面的部分。
+                skip = start if response.status_code == 200 else 0
+                remaining = end - start + 1
+                for chunk in response.iter_bytes(RANGE_CHUNK):
+                    if skip:
+                        if len(chunk) <= skip:
+                            skip -= len(chunk)
+                            continue
+                        chunk, skip = chunk[skip:], 0
+                    if len(chunk) >= remaining:
+                        yield chunk[:remaining]
+                        return
+                    remaining -= len(chunk)
+                    yield chunk
+        finally:
+            if owned:
+                client.close()
 
     def exists(self, path: str) -> bool:
         return self.stat(path) is not None

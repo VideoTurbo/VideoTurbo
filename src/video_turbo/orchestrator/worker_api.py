@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -18,7 +19,7 @@ from fastapi import (
     Query,
     Request,
 )
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from ..i18n import msg
 from ..models import (
@@ -34,12 +35,12 @@ from ..models import (
     WorkerHeartbeat,
     WorkerRegistration,
 )
-from ..plugins import registry
-from ..plugins.base import STATE_MAX_BYTES
-from ..plugins.settings import PluginSettings, data_key
+from ..plugins.base import STATE_MAX_BYTES, describe_error
+from ..plugins.settings import PluginSettings
 from . import chunked_upload, worker_service
 from .context import NO_STORE_HEADERS, app_state, require_worker
 from .rate_limit import ThrottledFileResponse
+from .sources import SourceUnavailable
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -106,10 +107,96 @@ def report_plugin_state(request: Request, job_id: str, report: PluginStateReport
         raise HTTPException(status_code=422, detail=msg("api.worker.stateNotJson")) from exc
     if json_size > STATE_MAX_BYTES:
         raise HTTPException(status_code=413, detail=msg("api.worker.stateTooLarge"))
-    plugin = registry.get("media_source", library.source)
-    key = data_key(plugin) if plugin else library.source
+    key = app_state(request).orchestrator.sources.state_key(library.source)
     PluginSettings(app_state(request).database).save_state(key, report.changes)
     return {"saved": True}
+
+
+def _byte_range(header: str | None, size: int) -> tuple[int, int] | None:
+    """Range 请求头 → (起点, 终点)，含两端；没有或不是单段字节范围时返回 None（返回整个文件）。
+
+    范围超出文件时抛出 416。
+    """
+    if not header or not header.startswith("bytes=") or "," in header:
+        return None
+    first, _, last = header[len("bytes=") :].strip().partition("-")
+    try:
+        if not first:
+            start, end = max(size - int(last), 0), size - 1
+        else:
+            start = int(first)
+            end = min(int(last), size - 1) if last else size - 1
+    except ValueError:
+        return None
+    if start < 0 or start > end:
+        raise HTTPException(
+            status_code=416, detail=msg("api.worker.badRange"), headers={"Content-Range": f"bytes */{size}"}
+        )
+    return start, end
+
+
+@router.api_route(
+    "/api/worker/media/{job_id}", methods=["GET", "HEAD"], dependencies=[Depends(require_worker)]
+)
+async def relay_media(
+    request: Request,
+    job_id: str,
+    x_worker_name: str = Header(default=""),
+    range_header: str | None = Header(default=None, alias="Range"),
+) -> Response:
+    """GPU 机器直连不了网盘时经主程序中转影片：主程序从媒体库来源读取，支持 Range 断点续传。
+
+    所有连接共享主程序上行限速。
+    """
+    state = app_state(request)
+    job = state.database.get_job(job_id)
+    if not job or not job["fetch_media"] or job["lease_owner"] != x_worker_name:
+        raise HTTPException(status_code=409, detail=msg("common.job_not_owned"))
+    library_id, path = str(job["library_id"]), str(job["media_path"])
+    sources = state.orchestrator.sources
+
+    def open_source() -> tuple[Any, Any]:
+        source = sources.for_library(library_id)
+        try:
+            return source, source.stat(path)
+        except BaseException:
+            source.close()
+            raise
+
+    try:
+        source, entry = await asyncio.to_thread(open_source)
+    except SourceUnavailable as exc:
+        raise HTTPException(status_code=503, detail=exc.message) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=describe_error(exc)) from exc
+    try:
+        if entry is None or entry.is_dir:
+            raise HTTPException(status_code=404, detail=msg("api.worker.sourceMissing"))
+        size = entry.size
+        ranged = _byte_range(range_header, size) if size else None
+        start, end = ranged or (0, size - 1)
+        headers = {**NO_STORE_HEADERS, "Accept-Ranges": "bytes", "Content-Length": str(end - start + 1)}
+        if ranged:
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        status = 206 if ranged else 200
+    except BaseException:
+        await asyncio.to_thread(source.close)
+        raise
+    if request.method == "HEAD" or not size:
+        await asyncio.to_thread(source.close)
+        return Response(status_code=status, headers=headers)
+    limiter = state.upload_limiter
+
+    async def body() -> Any:
+        chunks = source.read_range(path, start, end)
+        try:
+            while (chunk := await asyncio.to_thread(next, chunks, None)) is not None:
+                await limiter.acquire(len(chunk))
+                yield chunk
+        finally:
+            await asyncio.to_thread(source.close)
+
+    return StreamingResponse(body(), status_code=status, headers=headers, media_type="application/octet-stream")
 
 
 @router.get("/api/jobs/{job_id}/audio", dependencies=[Depends(require_worker)])

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from .i18n import msg
 
-WORKER_PROTOCOL_VERSION = 1
+WORKER_PROTOCOL_VERSION = 2
 PROTOCOL_HEADER = "X-VideoTurbo-Protocol"
 # 版本不一致时的 HTTP 状态码：426 Upgrade Required。
 PROTOCOL_MISMATCH_STATUS = 426

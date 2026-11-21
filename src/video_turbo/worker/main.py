@@ -20,7 +20,9 @@ from ..config import AudioConfig
 from ..environment import getenv
 from ..i18n import LocalizedFormatter, clip, msg, system_locale
 from ..media import MediaCancelled, extract_audio
+from ..media_sources import builtin as builtin_sources
 from ..media_sources import loader as source_loader
+from ..media_sources.base import MediaInput
 from ..models import WhisperJavProgress
 from ..naming import job_dir as cache_job_dir
 from ..protocol import PROTOCOL_HEADER, PROTOCOL_MISMATCH_STATUS, WORKER_PROTOCOL_VERSION
@@ -457,8 +459,11 @@ class Worker:
             except OSError:
                 pass
 
-    async def _media_plugin(self, plugin_id: str, sha256: str) -> type:
-        """按文件指纹加载媒体库来源插件；本进程已加载过的直接复用。"""
+    async def _media_plugin(self, media: dict) -> type:
+        """媒体库来源插件：内置来源用本机代码；其他按文件指纹加载，本进程已加载过的直接复用。"""
+        if media.get("builtin"):
+            return await asyncio.to_thread(builtin_sources.load, media["plugin_id"])
+        plugin_id, sha256 = media["plugin_id"], media["plugin_sha256"]
         plugin = source_loader.cached(sha256, plugin_id)
         if plugin is not None:
             return plugin
@@ -466,12 +471,30 @@ class Worker:
         response.raise_for_status()
         return await asyncio.to_thread(source_loader.load, response.text, sha256, plugin_id)
 
-    async def _fetch_media_audio(self, media: dict, audio_path: Path, job_id: str) -> None:
-        """网盘影片：用插件取得下载地址，边下载边提取音轨。下载地址失效时重新取一次。
+    def _relay_input(self, media: dict) -> MediaInput | None:
+        """经主程序中转下载影片的地址；主程序没有提供时为 None。"""
+        relay_path = str(media.get("relay_path") or "")
+        if not relay_path:
+            return None
+        return MediaInput(
+            self.config.server_url.rstrip("/") + relay_path,
+            {**self.headers, "X-Worker-Name": self.config.name},
+        )
 
-        插件在这期间保存的状态（例如刷新后的令牌）在结束后回传主程序。
+    async def _fetch_media_audio(self, media: dict, audio_path: Path, job_id: str) -> None:
+        """网盘影片：先用插件直连网盘，边下载边提取音轨；直连不了时经主程序中转。
+
+        直连时插件保持打开直到抽完音频（Samba 等来源在本机开了读取桥）。没有中转地址时直连失败重试一次
+        （下载地址可能过期）。插件在这期间保存的状态（例如刷新后的令牌）在结束后回传主程序。
         """
-        plugin = await self._media_plugin(media["plugin_id"], media["plugin_sha256"])
+        relay = self._relay_input(media)
+        try:
+            plugin: type | None = await self._media_plugin(media)
+        except Exception:
+            if relay is None:
+                raise
+            logger.warning("加载网盘插件失败，改为经主程序中转影片。", exc_info=True)
+            plugin = None
         audio = AudioConfig(
             channels=media["channels"],
             sample_rate=media["sample_rate"],
@@ -490,28 +513,49 @@ class Worker:
                     else:
                         state[key] = value
 
-        def run() -> None:
-            for attempt in range(2):
+        def extract(target: MediaInput) -> None:
+            try:
+                extract_audio(
+                    target,
+                    int(media["stream_index"]),
+                    audio_path,
+                    audio,
+                    timeout=6 * 3600,
+                    cancelled=self.cancel_requested.is_set,
+                )
+            except MediaCancelled as exc:
+                raise TranscriptionCancelled(msg("worker.cancelledVideo")) from exc
+
+        def direct() -> None:
+            attempts = 1 if relay else 2
+            for attempt in range(attempts):
                 with changes_lock:
                     current = dict(state)
-                with plugin(dict(media["settings"]), state=current, on_state=remember) as source:
-                    target = source.download(media["path"])
                 try:
-                    extract_audio(
-                        target,
-                        int(media["stream_index"]),
-                        audio_path,
-                        audio,
-                        timeout=6 * 3600,
-                        cancelled=self.cancel_requested.is_set,
-                    )
+                    with plugin(dict(media["settings"]), state=current, on_state=remember) as source:
+                        extract(source.download(media["path"]))
                     return
-                except MediaCancelled as exc:
-                    raise TranscriptionCancelled(msg("worker.cancelledVideo")) from exc
+                except TranscriptionCancelled:
+                    raise
                 except Exception:
-                    if attempt == 1:
+                    if attempt == attempts - 1:
                         raise
                     logger.warning("从网盘提取音频失败，重新获取下载地址后再试一次。", exc_info=True)
+
+        def run() -> None:
+            if plugin is not None:
+                try:
+                    direct()
+                    return
+                except TranscriptionCancelled:
+                    raise
+                except Exception:
+                    if relay is None:
+                        raise
+                    logger.warning("直连网盘失败，改为经主程序中转影片。", exc_info=True)
+            assert relay is not None
+            extract(relay)
+            logger.info("已经经主程序中转取得影片音轨。")
 
         try:
             await asyncio.to_thread(run)

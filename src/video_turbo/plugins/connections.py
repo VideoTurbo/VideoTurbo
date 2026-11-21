@@ -1,6 +1,7 @@
-"""媒体服务器、通知插件的配置：每类可以添加多份，各自启用或停用。
+"""媒体服务器、通知、网络存储（有 ``credential_fields`` 的媒体库来源插件，如 WebDAV、Samba）的配置：
+每类可以添加多份，各自启用或停用。网络存储的每份配置是一个媒体库来源，媒体库的 ``source`` 存配置 id。
 
-记录保存在 runtime_settings（``media_servers``、``notifiers``）::
+记录保存在 runtime_settings（``media_servers``、``notifiers``、``media_sources``）::
 
     {配置 id: {"type": 插件 id, "name": 名称, "enabled": bool, "values": {字段: 值}, "min_level": ...}}
 
@@ -17,7 +18,7 @@ from ..i18n import msg
 from . import registry
 from .base import PluginConfigError, PluginInfo, icon_uri, masked_values
 
-ID_PREFIX = {"media_server": "ms-", "notifier": "nt-"}
+ID_PREFIX = {"media_server": "ms-", "notifier": "nt-", "media_source": "src-"}
 # 通知配置的默认最低级别：警告和错误。
 DEFAULT_MIN_LEVEL = "warning"
 MIN_LEVELS = ("info", "warning", "error")

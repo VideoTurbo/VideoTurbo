@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from video_turbo.database import Database
 from video_turbo.i18n import render
 from video_turbo.media_servers.emby import EmbyServer, JellyfinServer
+from video_turbo.media_servers.fnos import FnosServer, authx
 from video_turbo.media_servers.plex import PlexServer
 from video_turbo.notifiers.base import Notice
 from video_turbo.notifiers.webhook import WebhookNotifier, sign
@@ -291,6 +292,121 @@ async def test_plex_errors_are_readable() -> None:
                 await server.test()
 
 
+# ---- 飞牛影视 --------------------------------------------------------------
+
+
+def _fn(data: object = None, code: int = 0, message: str = "") -> httpx.Response:
+    return httpx.Response(200, json={"code": code, "msg": message, "data": data})
+
+
+def _md5(text: str) -> str:
+    return hashlib.md5(text.encode()).hexdigest()
+
+
+def test_fnos_authx_signature() -> None:
+    header = authx("/v/api/v1/mdb/scanall", "", nonce="123456", timestamp="1700000000000")
+    expected = _md5(
+        "_".join(
+            [
+                "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh",
+                "/v/api/v1/mdb/scanall",
+                "123456",
+                "1700000000000",
+                _md5(""),
+                "16CCEB3D-AB42-077D-36A1-F355324E4237",
+            ]
+        )
+    )
+    assert header == f"nonce=123456&timestamp=1700000000000&sign={expected}"
+    random_header = dict(part.split("=") for part in authx("/v/x", "{}").split("&"))
+    assert len(random_header["nonce"]) == 6 and len(random_header["sign"]) == 32
+
+
+def test_fnos_address_validation() -> None:
+    values = {"url": " http://nas:5666/v/ ", "username": "admin", "password": "pw"}
+    assert FnosServer.merge_values({}, values)["url"] == "http://nas:5666"
+    with raises_rendered(PluginConfigError, "密码"):
+        FnosServer.merge_values({}, {"url": "http://nas:5666", "username": "admin"})
+
+
+async def test_fnos_login_scan_and_test() -> None:
+    recorder = Recorder(
+        {
+            "GET /c/my code": httpx.Response(302, headers={"location": "/"}),
+            "POST /v/api/v2/user/loginByPassword": _fn({"token": "tok-1"}),
+            "POST /v/api/v1/mdb/scanall": _fn(True),
+            "GET /v/api/v1/sys/version": _fn({"version": "0.9.1", "mediasrvVersion": "1.2.3"}),
+        }
+    )
+    values = {"url": "http://nas:5666", "username": "admin", "password": "pw", "access_code": "my code"}
+    async with FnosServer(values, transport=recorder.transport) as server:
+        await server.refresh()
+        assert render(await server.test()) == "连接成功：飞牛影视 1.2.3"
+    paths = [request.url.path for request in recorder.requests]
+    # 同一实例只登录一次；访问码在登录前校验。
+    assert paths == ["/c/my code", "/v/api/v2/user/loginByPassword", "/v/api/v1/mdb/scanall", "/v/api/v1/sys/version"]
+    login = recorder.requests[1]
+    assert json.loads(login.content) == {
+        "username": "admin",
+        "password": hashlib.sha256(b"pw").hexdigest(),
+        "app_name": "trimemedia-web",
+    }
+    assert "Authorization" not in login.headers
+    for request in recorder.requests[1:]:
+        fields = dict(part.split("=") for part in request.headers["authx"].split("&"))
+        body = request.content.decode()
+        assert fields["sign"] == _md5(
+            "_".join(
+                [
+                    "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh",
+                    request.url.path,
+                    fields["nonce"],
+                    fields["timestamp"],
+                    _md5(body),
+                    "16CCEB3D-AB42-077D-36A1-F355324E4237",
+                ]
+            )
+        )
+    assert all(request.headers["Authorization"] == "tok-1" for request in recorder.requests[2:])
+
+
+async def test_fnos_falls_back_to_v1_login_on_old_servers() -> None:
+    recorder = Recorder({"POST /v/api/v1/login": _fn({"token": "old"}), "POST /v/api/v1/mdb/scanall": _fn(True)})
+    values = {"url": "http://nas:5666", "username": "admin", "password": "pw"}
+    async with FnosServer(values, transport=recorder.transport) as server:
+        await server.refresh()
+    assert [request.url.path for request in recorder.requests] == [
+        "/v/api/v2/user/loginByPassword",
+        "/v/api/v1/login",
+        "/v/api/v1/mdb/scanall",
+    ]
+    assert json.loads(recorder.requests[1].content)["password"] == "pw"
+
+
+async def test_fnos_errors_are_readable() -> None:
+    values = {"url": "http://nas:5666", "username": "admin", "password": "bad"}
+    # 账号密码错误：不退回 v1，直接提示。
+    recorder = Recorder({"POST /v/api/v2/user/loginByPassword": _fn(code=1001, message="密码错误")})
+    async with FnosServer(values, transport=recorder.transport) as server:
+        with raises_rendered(PluginCallError, "检查账号和密码"):
+            await server.test()
+    assert len(recorder.requests) == 1
+    recorder = Recorder({"GET /c/x": 404})
+    async with FnosServer({**values, "access_code": "x"}, transport=recorder.transport) as server:
+        with raises_rendered(PluginCallError, "访问码不正确"):
+            await server.refresh()
+    recorder = Recorder(
+        {"POST /v/api/v2/user/loginByPassword": _fn({"token": "t"}), "POST /v/api/v1/mdb/scanall": _fn(False)}
+    )
+    async with FnosServer(values, transport=recorder.transport) as server:
+        with raises_rendered(PluginCallError, "没有开始扫描"):
+            await server.refresh()
+    recorder = Recorder({"POST /v/api/v2/user/loginByPassword": httpx.Response(200, text="<html>")})
+    async with FnosServer(values, transport=recorder.transport) as server:
+        with raises_rendered(PluginCallError, "飞牛影视"):
+            await server.test()
+
+
 # ---- Webhook ---------------------------------------------------------------
 
 
@@ -467,7 +583,7 @@ def test_connection_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     with TestClient(app) as client:
         app.state.plugin_transport = recorder.transport
         types = client.get("/api/media-servers/types").json()
-        assert [item["id"] for item in types] == ["emby", "jellyfin", "plex"]
+        assert [item["id"] for item in types] == ["emby", "jellyfin", "plex", "fnos"]
         assert types[0]["fields"][0]["binds_secrets"] is True
         assert [item["id"] for item in client.get("/api/notifiers/types").json()] == ["webhook"]
         assert client.get("/api/media-servers").json() == []

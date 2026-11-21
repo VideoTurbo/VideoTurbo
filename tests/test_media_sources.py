@@ -293,9 +293,9 @@ def test_cloud_library_scans_through_plugin_and_gpu_fetches_media(
         assert claim["job_id"] == job_id and claim["audio_url"] is None
         saved_settings = db.plugin_data("folder-drive")["settings"]
         assert claim["media"] == {
-            "plugin_id": "folder-drive", "plugin_sha256": sha256, "settings": saved_settings, "state": {},
-            "path": "/影视/movie.mkv", "stream_index": 0, "channels": 1, "sample_rate": 16000,
-            "opus_bitrate": app.state.config.audio.opus_bitrate,
+            "plugin_id": "folder-drive", "plugin_sha256": sha256, "builtin": False, "settings": saved_settings,
+            "state": {}, "path": "/影视/movie.mkv", "stream_index": 0, "channels": 1, "sample_rate": 16000,
+            "opus_bitrate": app.state.config.audio.opus_bitrate, "relay_path": f"/api/worker/media/{job_id}",
         }
 
         # GPU 机器按文件指纹下载插件源码并加载。
@@ -453,3 +453,144 @@ def test_worker_extracts_audio_from_plugin_download(tmp_path: Path) -> None:
     assert output.stat().st_size > 0
     # 插件在下载时保存的状态回传主程序。
     assert reported == [("job-1", {"downloads": 6})]
+
+
+def test_network_storage_library_scans_and_relays_media(tmp_path: Path, monkeypatch, idle_pipeline) -> None:
+    import httpx
+    from test_webdav import FakeDav
+
+    from video_turbo.media_sources.webdav import WebDavSource
+
+    server = FakeDav()
+    server.add("/影视/movie.mkv", b"0123456789")
+    transport = httpx.MockTransport(server)
+    original = WebDavSource.__init__
+    monkeypatch.setattr(
+        WebDavSource, "__init__", lambda self, *args, **kwargs: original(self, *args, **{**kwargs, "transport": transport})
+    )
+    prepare_server(tmp_path, monkeypatch, worker_token=TOKEN)
+    probed: list = []
+    monkeypatch.setattr("video_turbo.orchestrator.processor.run_ffprobe", lambda target: probed.append(target) or AUDIO_PROBE)
+    values = {"url": "http://nas:5005/dav", "username": "user", "password": "pw"}
+    with TestClient(app) as client:
+        # WebDAV 是内置插件，列在插件页；按多份配置在“网络存储”里添加。
+        plugins = {item["id"]: item for item in client.get("/api/plugins").json()["plugins"]}
+        assert plugins["webdav"]["source"] == "builtin"
+        assert [item["id"] for item in client.get("/api/media-sources/types").json()] == ["webdav", "smb"]
+        tested = client.post("/api/media-sources/types/webdav/test", json={"values": values}).json()
+        assert render(tested["message"]) == "连接成功：根目录下有 1 项。"
+        bad = client.post("/api/media-sources/types/webdav/test", json={"values": {**values, "password": "x"}})
+        assert bad.status_code == 400 and "检查账号、密码" in render(bad.json()["detail"])
+        created = client.post("/api/media-sources", json={"type": "webdav", "name": "书房 NAS", "values": values})
+        connection_id = created.json()["id"]
+        assert connection_id.startswith("src-")
+        listed = client.get("/api/media-sources").json()
+        assert listed[0]["summary"] == "http://nas:5005/dav" and listed[0]["values"]["password"] == "••••••"
+        assert listed[0]["type_icon"].startswith("data:image/svg+xml")
+
+        sources = client.get("/api/libraries/sources").json()
+        assert [(item["id"], item["kind"], item["label"]) for item in sources] == [(connection_id, "connection", "书房 NAS")]
+        assert render(sources[0]["description"]) == "WebDAV · http://nas:5005/dav"
+        browse = client.get("/api/libraries/browse", params={"source": connection_id}).json()
+        assert [item["path"] for item in browse["folders"]] == ["/影视"]
+        library = client.post("/api/libraries", json={"name": "NAS 电影", "source": connection_id, "path": "/影视"})
+        assert library.status_code == 200, library.text
+        library_id = library.json()["id"]
+        card = client.get("/api/libraries").json()[0]
+        assert card["source_label"] == "书房 NAS" and render(card["source_type"]) == "WebDAV" and card["problem"] is None
+        # 被媒体库使用的网络存储不能删除。
+        blocked = client.delete(f"/api/media-sources/{connection_id}")
+        assert blocked.status_code == 409 and "NAS 电影" in render(blocked.json()["detail"])
+
+        assert client.post("/api/scan", json={"library_ids": [library_id]}).status_code == 200
+        assert [item.url for item in probed] == ["http://nas:5005/dav/%E5%BD%B1%E8%A7%86/movie.mkv"]
+        db: Database = app.state.database
+        job_id = db.list_jobs()[0]["id"]
+        db.start_job(job_id)
+        app.state.orchestrator._prepare_job(db.get_job(job_id))
+        registration = {
+            "name": "gpu", "version": "0", "gpu_name": "test", "memory_total_mb": 1, "model": "m",
+            "compute_type": "f", "supported_asr_modes": ["whisperjav", "faster_whisper"],
+            "supports_whisperjav_ensemble": True, "supports_media_fetch": True,
+        }
+        client.post("/api/workers/register", headers=HEADERS, json=registration)
+        claim = client.post("/api/workers/gpu/claim", headers=HEADERS).json()
+        media = claim["media"]
+        # 内置来源不下载源码，设置是这份配置的值。
+        assert (media["plugin_id"], media["plugin_sha256"], media["builtin"]) == ("webdav", "", True)
+        assert media["settings"] == values and media["relay_path"] == f"/api/worker/media/{job_id}"
+
+        # 经主程序中转：只给领取了任务的机器，支持 Range。
+        relay = media["relay_path"]
+        assert client.get(relay, headers=HEADERS).status_code == 409
+        assert client.get(relay, headers={"X-Worker-Name": "gpu"}).status_code == 401
+        worker = {**HEADERS, "X-Worker-Name": "gpu"}
+        full = client.get(relay, headers=worker)
+        assert full.status_code == 200 and full.content == b"0123456789" and full.headers["accept-ranges"] == "bytes"
+        part = client.get(relay, headers={**worker, "Range": "bytes=2-5"})
+        assert part.status_code == 206 and part.content == b"2345"
+        assert part.headers["content-range"] == "bytes 2-5/10"
+        assert client.get(relay, headers={**worker, "Range": "bytes=-3"}).content == b"789"
+        assert client.get(relay, headers={**worker, "Range": "bytes=20-"}).status_code == 416
+        head = client.head(relay, headers=worker)
+        assert head.status_code == 200 and head.headers["content-length"] == "10"
+
+        # 停用后媒体库标记为不可用；删掉媒体库后可以删除网络存储。
+        client.put(f"/api/media-sources/{connection_id}", json={"name": "书房 NAS", "enabled": False, "values": {}})
+        assert "已停用" in render(client.get("/api/libraries").json()[0]["problem"])
+        assert client.get("/api/libraries/sources").json() == []
+        force_job_state(db, job_id, JobState.COMPLETED)
+        assert client.delete(f"/api/libraries/{library_id}").status_code == 200
+        assert client.delete(f"/api/media-sources/{connection_id}").json() == {"removed": True}
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="需要 FFmpeg")
+def test_worker_falls_back_to_main_relay(tmp_path: Path) -> None:
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from video_turbo.worker.config import WorkerConfig
+    from video_turbo.worker.main import Worker
+
+    movie = tmp_path / "movie.mp4"
+    subprocess.run(
+        ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:a", "aac", str(movie)],
+        check=True,
+    )
+    seen: list = []
+
+    class Relay(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen.append((self.path, self.headers.get("X-Worker-Name"), self.headers.get("X-Worker-Token")))
+            data = movie.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args) -> None:
+            pass
+
+    relay = ThreadingHTTPServer(("127.0.0.1", 0), Relay)
+    threading.Thread(target=relay.serve_forever, daemon=True).start()
+    try:
+        worker = Worker(
+            WorkerConfig(server_url=f"http://127.0.0.1:{relay.server_port}", worker_token="t", name="w", work_dir=tmp_path / "w")
+        )
+        output = tmp_path / "audio.opus"
+        # WebDAV 服务器连不上（端口 1）：改为经主程序中转。
+        media = {
+            "plugin_id": "webdav", "plugin_sha256": "", "builtin": True, "settings": {"url": "http://127.0.0.1:1/dav"},
+            "state": {}, "path": "/movie.mp4", "stream_index": 0, "channels": 1, "sample_rate": 16000,
+            "opus_bitrate": "32k", "relay_path": "/api/worker/media/job-1",
+        }
+
+        async def run() -> None:
+            await worker._fetch_media_audio(media, output, "job-1")
+            await worker.close()
+
+        asyncio.run(run())
+    finally:
+        relay.shutdown()
+    assert output.stat().st_size > 0
+    assert seen and all(item == ("/api/worker/media/job-1", "w", "t") for item in seen)

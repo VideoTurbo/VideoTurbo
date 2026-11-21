@@ -108,6 +108,7 @@ def claim_asr_job(state: AppState, name: str) -> JobClaim | None:
             return None
         media = MediaFetch(
             **transfer,
+            relay_path=f"/api/worker/media/{job['id']}",
             stream_index=int(job["source_stream_index"]),
             channels=config.audio.channels,
             sample_rate=config.audio.sample_rate,

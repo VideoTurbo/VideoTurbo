@@ -200,8 +200,12 @@ class MediaFetch(BaseModel):
     """网盘影片由 GPU 机器直接下载抽音频：加载哪个插件、用什么设置、抽哪条音轨。"""
 
     plugin_id: str
-    # 插件源码的 SHA-256；GPU 机器按它从主程序下载插件并核对。
+    # 插件源码的 SHA-256；GPU 机器按它从主程序下载插件并核对。内置来源为空字符串。
     plugin_sha256: str
+    # 内置来源（WebDAV、Samba）：GPU 机器用自带的代码加载，不下载源码。
+    builtin: bool = False
+    # 直连网盘失败时经主程序中转下载影片的接口路径（相对主程序地址）。
+    relay_path: str = ""
     # 插件设置（含密钥）和插件状态（令牌等），只保存在 GPU 机器的内存中。
     settings: dict[str, Any]
     state: dict[str, Any]

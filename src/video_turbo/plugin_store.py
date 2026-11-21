@@ -1,4 +1,4 @@
-"""插件相关的持久化：按地址安装的插件源码、插件仓库、媒体服务器和通知插件的配置，以及插件设置和插件状态。
+"""插件相关的持久化：按地址安装的插件源码、插件仓库、媒体服务器、通知和网络存储（WebDAV、Samba 等）的配置，以及插件设置和插件状态。
 全部保存在 runtime_settings。"""
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ INSTALLED_KEY = "plugins"
 CONNECTION_KEYS = {
     "media_server": "media_servers",
     "notifier": "notifiers",
+    "media_source": "media_sources",
 }
 # 插件设置与插件状态：{插件 id: {"settings": {...}, "state": {...}}}。插件卸载后保留，重新安装后恢复。
 PLUGIN_DATA_KEY = "plugin_data"

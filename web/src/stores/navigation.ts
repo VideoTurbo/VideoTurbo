@@ -4,7 +4,7 @@ import { queryParam, setQueryParams } from '@/lib/list'
 
 export type Tab = 'subtitle' | 'restore' | 'compute' | 'translate' | 'settings'
 export type SettingsCategory =
-  | 'media' | 'media_servers' | 'subtitle' | 'restore' | 'cloud'
+  | 'media' | 'storage' | 'media_servers' | 'subtitle' | 'restore' | 'cloud'
   | 'plugins' | 'ui' | 'notifiers' | 'system' | 'account'
 
 const TABS: Tab[] = ['subtitle', 'restore', 'compute', 'translate', 'settings']
