@@ -1,4 +1,5 @@
-# 桌面版安装包：Windows（NSIS，按当前用户安装）和 macOS（Apple 芯片，dmg）。
+# 桌面版安装包：主程序应用 Windows（NSIS，按当前用户安装）和 macOS（Apple 芯片，dmg），
+# 识别机应用（VideoTurbo Worker）只出 Windows 版。
 # PyInstaller 不能跨平台打包，每个平台在各自的 runner 上构建。改动桌面版或主程序代码的 PR 都会构建一次，
 # 产物作为 artifact 上传，可下载试用。暂不做代码签名：macOS 只做 ad-hoc 签名，Windows 不签名。
 name: 桌面版
@@ -73,6 +74,11 @@ jobs:
       - name: 构建安装包
         working-directory: desktop/apps/videoturbo
         run: npx --prefix ../.. tauri build --bundles ${{ matrix.bundle }}
+      # 独立的识别机应用只出 Windows 版。
+      - name: 构建识别机安装包
+        if: runner.os == 'Windows'
+        working-directory: desktop/apps/worker
+        run: npx --prefix ../.. tauri build --bundles nsis
       - uses: actions/upload-artifact@v7
         with:
           name: VideoTurbo-${{ matrix.bundle }}

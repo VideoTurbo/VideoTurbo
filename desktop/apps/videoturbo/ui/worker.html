@@ -1,0 +1,120 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VideoTurbo</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    main { padding: 20px 24px; }
+    section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+    .head { display: flex; align-items: center; gap: 12px; }
+    .head h2 { font-size: 15px; margin: 0; flex: 1; }
+    .help { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+    .switch { position: relative; width: 42px; height: 24px; flex: none; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 12px; cursor: pointer; transition: background .15s; }
+    .switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+    .switch input:checked + span { background: var(--accent); }
+    .switch input:checked + span::after { transform: translateX(18px); }
+    .state { font-weight: 600; }
+    .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 10px 0 6px; }
+    .bar div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+    .line { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; color: var(--muted);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 16px; }
+    pre { white-space: pre-wrap; word-break: break-all; max-height: 150px; overflow: auto; font-size: 11.5px;
+          background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 8px 0 0; }
+    .warn { color: var(--bad); font-size: 12.5px; margin: 8px 0 0; }
+    footer { display: flex; gap: 8px; justify-content: flex-end; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <div class="head">
+        <h2 id="t-title"></h2>
+        <label class="switch"><input type="checkbox" id="enabled"><span></span></label>
+      </div>
+      <p class="help" id="t-help"></p>
+      <p class="warn" id="no-gpu" hidden></p>
+    </section>
+    <section id="status-box">
+      <div class="state" id="state"></div>
+      <div id="progress" hidden>
+        <div class="bar"><div id="bar"></div></div>
+        <div class="line" id="step"></div>
+      </div>
+      <div class="line" id="line"></div>
+      <p class="help" id="hint"></p>
+      <pre id="detail" hidden></pre>
+    </section>
+    <footer>
+      <button id="tools" hidden></button>
+      <button id="retry" hidden></button>
+      <button id="logs"></button>
+    </footer>
+  </main>
+  <script>
+    const zh = (navigator.language || '').toLowerCase().startsWith('zh')
+    const T = zh ? {
+      title: '本机识别', help: '让这台电脑也处理语音识别任务。第一次开启时会下载运行环境（约 2 GB）和识别模型（约 4 GB），之后不用再下载。与桌面、游戏共用显卡时，只在显卡空闲时接单。',
+      noGpu: '没有检测到 NVIDIA 显卡，识别会用 CPU，速度很慢。', macCpu: 'Mac 上识别使用 CPU，速度比 NVIDIA 显卡慢很多。',
+      off: '未开启', waiting: '正在连接主程序…', installing: '正在安装运行环境', selfTest: '正在下载识别模型并自检（第一次需要较长时间）',
+      running: '运行中：有识别任务时会自动处理', failed: '出错了', conflict: '这台电脑上的 VideoTurbo Worker 正在使用显卡，它停下后会自动接手', needTools: '需要先安装 Apple 的命令行开发工具（含 Git）',
+      needToolsHint: '点“安装命令行工具”，在弹出的窗口里按提示安装，装好后点“重试”。', tools: '安装命令行工具', retry: '重试', logs: '打开日志文件夹',
+    } : {
+      title: 'Local recognition', help: 'Let this computer process speech recognition jobs too. The first time downloads the program environment (about 2 GB) and models (about 4 GB). When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
+      noGpu: 'No NVIDIA GPU detected; recognition will use the CPU and be very slow.', macCpu: 'On a Mac, recognition uses the CPU and is much slower than an NVIDIA GPU.',
+      off: 'Off', waiting: 'Connecting to the main app…', installing: 'Installing the program environment', selfTest: 'Downloading models and running the self-test (the first time takes a while)',
+      running: 'Running: jobs are processed automatically', failed: 'Something went wrong', conflict: 'VideoTurbo Worker on this computer is using the GPU; this takes over when it stops', needTools: "Apple's command line developer tools (including Git) are needed",
+      needToolsHint: 'Click "Install command line tools", follow the prompts, then click "Retry".', tools: 'Install command line tools', retry: 'Retry', logs: 'Open logs folder',
+    }
+    const { invoke } = window.__TAURI__.core
+    const $ = (id) => document.getElementById(id)
+    $('t-title').textContent = T.title
+    $('t-help').textContent = T.help
+    $('tools').textContent = T.tools
+    $('retry').textContent = T.retry
+    $('logs').textContent = T.logs
+    let busy = false
+
+    $('enabled').onchange = async () => {
+      busy = true
+      try { await invoke('worker_set', { enabled: $('enabled').checked }) } finally { busy = false }
+      refresh()
+    }
+    $('retry').onclick = () => invoke('worker_set', { enabled: true }).then(refresh)
+    $('tools').onclick = () => invoke('worker_install_tools')
+    $('logs').onclick = () => invoke('worker_open_logs')
+
+    function render(view) {
+      if (!busy) $('enabled').checked = view.enabled
+      const warn = view.platform === 'macos' ? T.macCpu : view.nvidia === false ? T.noGpu : ''
+      $('no-gpu').textContent = warn
+      $('no-gpu').hidden = !warn || !view.enabled
+      const labels = { off: T.off, waiting: T.waiting, installing: T.installing, self_test: T.selfTest,
+                       running: T.running, failed: T.failed, need_tools: T.needTools, conflict: T.conflict }
+      $('state').textContent = labels[view.phase] || view.phase
+      const installing = view.phase === 'installing'
+      $('progress').hidden = !installing
+      if (installing) {
+        $('bar').style.width = `${Math.round(((view.index - 1) / Math.max(view.total, 1)) * 100)}%`
+        $('step').textContent = `${view.index}/${view.total} ${zh ? view.zh : view.en}`
+      }
+      $('line').textContent = view.line || ''
+      $('hint').textContent = view.phase === 'need_tools' ? T.needToolsHint : view.phase === 'failed' ? view.message : ''
+      $('detail').textContent = view.detail || ''
+      $('detail').hidden = !view.detail
+      $('tools').hidden = view.phase !== 'need_tools'
+      $('retry').hidden = !(view.enabled && (view.phase === 'failed' || view.phase === 'need_tools'))
+    }
+
+    async function refresh() {
+      try { render(await invoke('worker_state')) } catch (error) { console.error(error) }
+    }
+    refresh()
+    setInterval(refresh, 700)
+  </script>
+</body>
+</html>

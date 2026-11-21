@@ -1,4 +1,4 @@
-"""Install the isolated, pinned ASR backend. Invoked by both Worker installers."""
+"""Install the isolated, pinned ASR backend. Invoked by deploy/worker/linux/worker.sh and the desktop installer (tools/desktop_worker.py)."""
 
 from __future__ import annotations
 

@@ -280,3 +280,14 @@ def test_desktop_sessions_end_when_the_main_app_restarts(desktop) -> None:
 
 def test_desktop_login_is_off_without_a_shell_token(client: TestClient) -> None:
     assert client.get("/api/auth/desktop", params={"token": ""}).status_code == 403
+
+
+def test_desktop_shell_can_fetch_worker_token(desktop) -> None:
+    header = {auth.DESKTOP_TOKEN_HEADER: "shell-token"}
+    with desktop("127.0.0.1") as local:
+        assert local.get("/api/auth/desktop/worker").status_code == 403
+        assert local.get("/api/auth/desktop/worker", headers={auth.DESKTOP_TOKEN_HEADER: "x"}).status_code == 403
+        response = local.get("/api/auth/desktop/worker", headers=header)
+        assert response.json() == {"worker_token": "worker-secret", "worker_port": 8766}
+    with desktop("192.168.1.20") as remote:
+        assert remote.get("/api/auth/desktop/worker", headers=header).status_code == 403

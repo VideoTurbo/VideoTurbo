@@ -72,5 +72,5 @@ body:
       label: GPU PC logs (if the problem involves a GPU PC)
       description: |
         Linux: `bash deploy/worker/linux/worker.sh logs asr --lines 200` (or `logs restore`)
-        Windows: `.\deploy\worker\windows\worker.ps1 logs -Lines 200`
+        Windows (VideoTurbo Worker): tray menu → "Open logs folder", attach `worker-standalone.log`
       render: shell

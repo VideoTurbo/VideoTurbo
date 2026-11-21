@@ -76,7 +76,7 @@ def test_worker_bundle_contains_linux_worker_files() -> None:
     assert members["deploy/worker/linux/worker.sh"].mode == 0o755
     assert not any(name.startswith("deploy/worker/linux/") and name != "deploy/worker/linux/worker.sh" for name in members)
     assert not any(
-        "__pycache__" in name or name.startswith(("tests/", "deploy/worker/windows")) for name in members
+        "__pycache__" in name or name.startswith("tests/") for name in members
     )
     assert not any(name in {"config/worker.yaml", "deploy/server/.env"} for name in members)
 

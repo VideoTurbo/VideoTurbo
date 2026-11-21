@@ -24,17 +24,23 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_opener::OpenerExt as _;
 
 use server::{Paths, Phase, Server};
+use shell_core::connection::Connection;
+use shell_core::worker_env::WorkerEnv;
+use shell_core::worker_manager::{Connect, WorkerManager, WorkerPhase};
 use texts::Texts;
 
 const AUTOSTART_ARG: &str = "--autostart";
 const MAIN: &str = "main";
 const SETTINGS: &str = "settings";
+const WORKER: &str = "worker";
 
 struct Shell {
     server: Arc<Server>,
+    worker: Arc<WorkerManager>,
     texts: Arc<Texts>,
     logger: Arc<Logger>,
     status_item: MenuItem<Wry>,
+    worker_item: MenuItem<Wry>,
     autostart_item: CheckMenuItem<Wry>,
 }
 
@@ -99,6 +105,20 @@ fn show_settings(app: &AppHandle) {
         .build();
 }
 
+fn show_worker(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(WORKER) {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+    let title = shell(app).texts.local_worker_title();
+    let _ = WebviewWindowBuilder::new(app, WORKER, WebviewUrl::App("worker.html".into()))
+        .title(title)
+        .inner_size(600.0, 520.0)
+        .resizable(false)
+        .build();
+}
+
 fn open_folder(app: &AppHandle, folder: PathBuf) {
     let _ = std::fs::create_dir_all(&folder);
     if let Err(error) = app.opener().open_path(folder.to_string_lossy(), None::<&str>) {
@@ -110,6 +130,7 @@ fn build_tray(app: &AppHandle, state: &Shell) -> tauri::Result<()> {
     let texts = &state.texts;
     let open = MenuItem::with_id(app, "open", texts.open_console(), true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", texts.settings(), true, None::<&str>)?;
+    let worker = MenuItem::with_id(app, "worker", texts.local_worker(), true, None::<&str>)?;
     let data = MenuItem::with_id(app, "data", texts.open_data(), true, None::<&str>)?;
     let logs = MenuItem::with_id(app, "logs", texts.open_logs(), true, None::<&str>)?;
     let restart = MenuItem::with_id(app, "restart", texts.restart(), true, None::<&str>)?;
@@ -118,8 +139,10 @@ fn build_tray(app: &AppHandle, state: &Shell) -> tauri::Result<()> {
         app,
         &[
             &state.status_item,
+            &state.worker_item,
             &PredefinedMenuItem::separator(app)?,
             &open,
+            &worker,
             &settings,
             &state.autostart_item,
             &PredefinedMenuItem::separator(app)?,
@@ -147,6 +170,7 @@ fn build_tray(app: &AppHandle, state: &Shell) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main(app),
             "settings" => show_settings(app),
+            "worker" => show_worker(app),
             "autostart" => toggle_autostart(app),
             "data" => open_folder(app, shell(app).server.paths().home.clone()),
             "logs" => open_folder(app, shell(app).server.paths().logs()),
@@ -242,6 +266,8 @@ fn save_settings(app: AppHandle, input: SettingsInput) -> Result<(), String> {
             .filter(|dir| !dir.is_empty())
             .map(PathBuf::from),
         safe_mode: input.safe_mode,
+        // 本机识别在它自己的窗口里开关，设置页不改它。
+        local_worker: state.server.settings().local_worker,
     };
     settings.validate().map_err(|invalid| state.texts.invalid_settings(&invalid))?;
     if settings == state.server.settings() {
@@ -255,6 +281,88 @@ fn save_settings(app: AppHandle, input: SettingsInput) -> Result<(), String> {
         }
     });
     Ok(())
+}
+
+/// 本机识别的接入信息：等主程序就绪后，凭这次启动的令牌从本机接口取接入密钥和端口。
+fn local_connection(server: Arc<Server>) -> Connect {
+    #[derive(Deserialize)]
+    struct Access {
+        worker_token: String,
+        worker_port: u16,
+    }
+    Box::new(move |alive: &dyn Fn() -> bool| loop {
+        if !alive() {
+            return None;
+        }
+        if let Some((port, token)) = server.ready() {
+            let reply = shell_core::process::http_get(
+                port,
+                "/api/auth/desktop/worker",
+                &[("X-VideoTurbo-Desktop-Token", &token)],
+                std::time::Duration::from_secs(5),
+            );
+            if let Some((200, body)) = reply {
+                if let Ok(access) = serde_json::from_str::<Access>(&body) {
+                    return Some(Connection {
+                        server_url: format!("http://127.0.0.1:{}", access.worker_port),
+                        token: access.worker_token,
+                    });
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    })
+}
+
+#[derive(Serialize)]
+struct WorkerView {
+    #[serde(flatten)]
+    phase: WorkerPhase,
+    enabled: bool,
+    platform: &'static str,
+    /// Windows 上是否检测到 NVIDIA 显卡（没有时只能用 CPU，很慢）；macOS 为 None。
+    nvidia: Option<bool>,
+}
+
+#[tauri::command]
+fn worker_state(app: AppHandle) -> WorkerView {
+    let state = shell(&app);
+    WorkerView {
+        phase: state.worker.phase(),
+        enabled: state.server.settings().local_worker,
+        platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
+        nvidia: shell_core::worker_env::has_nvidia(),
+    }
+}
+
+/// 开启或关闭本机识别；失败后再点开启即重试。
+#[tauri::command]
+fn worker_set(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let state = shell(&app);
+    state.server.set_local_worker(enabled).map_err(|error| error.to_string())?;
+    if enabled {
+        state.worker.start(Some(local_connection(Arc::clone(&state.server))));
+    } else {
+        let worker = Arc::clone(&state.worker);
+        std::thread::spawn(move || worker.stop());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn worker_open_logs(app: AppHandle) {
+    let folder = shell(&app).worker.env().logs();
+    open_folder(&app, folder);
+}
+
+/// macOS：打开 Apple 的命令行开发工具安装程序（含 Git）。
+#[tauri::command]
+fn worker_install_tools() -> Result<(), String> {
+    std::process::Command::new("xcode-select")
+        .arg("--install")
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 // ---------------------------------------------------------------- 启动
@@ -277,6 +385,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let settings = ServerSettings::load(&paths.settings_file());
 
     let status_item = MenuItem::with_id(app, "status", texts.status_stopped(), false, None::<&str>)?;
+    let worker_item =
+        MenuItem::with_id(app, "worker_status", texts.worker_status(&WorkerPhase::Off), false, None::<&str>)?;
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart_item =
         CheckMenuItem::with_id(app, "autostart", texts.autostart(), true, autostart_enabled, None::<&str>)?;
@@ -292,10 +402,45 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 let handle = handle.clone();
                 let _ = handle.clone().run_on_main_thread(move || reload_main(&handle));
             }
+            // 主程序（重新）就绪后接上本机识别：端口可能变了。这里还持有主程序的锁，放到线程里做。
+            if matches!(phase, Phase::Running { .. }) {
+                let handle = handle.clone();
+                std::thread::spawn(move || {
+                    if let Some(state) = handle.try_state::<Shell>() {
+                        if state.server.settings().local_worker {
+                            state.worker.start(Some(local_connection(Arc::clone(&state.server))));
+                        }
+                    }
+                });
+            }
         })
     };
+    let worker_env = WorkerEnv {
+        root: home.join("worker"),
+        bundle: paths.resources.join("worker-bundle"),
+        uv: paths.resources.join("uv").join(if cfg!(windows) { "uv.exe" } else { "uv" }),
+        ffmpeg_dir: paths.resources.join("ffmpeg"),
+        language: texts.lang.server_code().into(),
+        config_dir: "config".into(),
+    };
+    let worker_notify = {
+        let worker_item = worker_item.clone();
+        let texts = Arc::clone(&texts);
+        Box::new(move |phase: &WorkerPhase| {
+            let _ = worker_item.set_text(texts.worker_status(phase));
+        })
+    };
+    let worker = WorkerManager::new(worker_env, Arc::clone(&logger), worker_notify);
     let server = Server::new(paths, settings, Arc::clone(&texts), Arc::clone(&logger), notify);
-    let state = Shell { server: Arc::clone(&server), texts, logger, status_item, autostart_item };
+    let state = Shell {
+        server: Arc::clone(&server),
+        worker,
+        texts,
+        logger,
+        status_item,
+        worker_item,
+        autostart_item,
+    };
     build_tray(&handle, &state)?;
     app.manage(state);
 
@@ -318,7 +463,11 @@ fn main() {
             restart_server,
             open_logs,
             get_settings,
-            save_settings
+            save_settings,
+            worker_state,
+            worker_set,
+            worker_open_logs,
+            worker_install_tools
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -338,6 +487,7 @@ fn main() {
         RunEvent::Reopen { .. } => show_main(app),
         RunEvent::Exit => {
             if let Some(state) = app.try_state::<Shell>() {
+                state.worker.stop();
                 state.server.shutdown();
                 state.logger.info("VideoTurbo 桌面版退出");
             }

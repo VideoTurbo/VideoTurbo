@@ -122,6 +122,8 @@ struct Inner {
     generation: u64,
     restarts: Vec<Instant>,
     settings: ServerSettings,
+    /// 这次启动给主程序的令牌：应用内窗口登录、外壳取本机识别的接入信息都用它。
+    token: String,
 }
 
 pub struct Server {
@@ -150,6 +152,7 @@ impl Server {
                 generation: 0,
                 restarts: Vec::new(),
                 settings,
+                token: String::new(),
             }),
             notify,
         })
@@ -169,6 +172,22 @@ impl Server {
 
     pub fn settings(&self) -> ServerSettings {
         self.lock().settings.clone()
+    }
+
+    /// 主程序已就绪时返回（控制台端口，这次启动的令牌）。
+    pub fn ready(&self) -> Option<(u16, String)> {
+        let inner = self.lock();
+        matches!(inner.phase, Phase::Running { .. })
+            .then(|| (inner.settings.console_port, inner.token.clone()))
+    }
+
+    /// 只改本机识别开关，不重启主程序。
+    pub fn set_local_worker(&self, enabled: bool) -> std::io::Result<()> {
+        let mut inner = self.lock();
+        let settings = ServerSettings { local_worker: enabled, ..inner.settings.clone() };
+        settings.save(&self.paths.settings_file())?;
+        inner.settings = settings;
+        Ok(())
     }
 
     fn set_phase(&self, inner: &mut Inner, phase: Phase) {
@@ -230,6 +249,7 @@ impl Server {
             Ok(running) => {
                 self.logger.info(&format!("主程序已启动（进程 {}）", running.id()));
                 inner.running = Some(running);
+                inner.token = token.clone();
                 self.set_phase(&mut inner, Phase::Starting);
             }
             Err(error) => {

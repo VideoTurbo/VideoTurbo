@@ -50,6 +50,7 @@ DESKTOP_TOKEN_ENV = "VIDEO_TURBO_DESKTOP_TOKEN"
 # 桌面版应用内窗口的会话以此开头，用内存里的密钥签名。
 DESKTOP_PREFIX = "d."
 LOOPBACK = frozenset({"127.0.0.1", "::1"})
+DESKTOP_TOKEN_HEADER = "X-VideoTurbo-Desktop-Token"
 COOKIE_NAME = "jf_session"
 SESSION_SECONDS = 30 * 24 * 3600
 MIN_PASSWORD_LENGTH = 8
@@ -69,6 +70,7 @@ PUBLIC_PATHS = frozenset(
         "/api/auth/login",
         "/api/auth/logout",
         "/api/auth/desktop",
+        "/api/auth/desktop/worker",
     }
 )
 
@@ -358,6 +360,16 @@ def _renew_session(request: Request, response: Response) -> None:
     if auth.is_desktop_session(current) and auth.verify_token(current):
         return
     _start_session(request, response)
+
+
+@router.get("/api/auth/desktop/worker", include_in_schema=False)
+async def desktop_worker(request: Request) -> dict:
+    """桌面版外壳开启本机识别时取接入信息：只接受本机请求和这次启动的令牌（请求头）。"""
+    auth = _auth(request)
+    if _client(request) not in LOOPBACK or not auth.check_desktop_token(request.headers.get(DESKTOP_TOKEN_HEADER, "")):
+        raise HTTPException(status_code=403, detail=msg("auth.desktopTokenInvalid"))
+    state = app_state(request)
+    return {"worker_token": state.worker_token, "worker_port": state.config.server.worker_port}
 
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)

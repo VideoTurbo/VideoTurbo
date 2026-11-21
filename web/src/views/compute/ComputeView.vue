@@ -11,7 +11,8 @@ import { cloud, heartbeatTimeout, status } from '@/stores/status'
 import CloudBindDialog from './CloudBindDialog.vue'
 import CloudInstances from './CloudInstances.vue'
 import CloudProvidersDialog from './CloudProvidersDialog.vue'
-import { openLaunch, providersOpen } from './dialogs'
+import AddWorkerDialog from './AddWorkerDialog.vue'
+import { addWorkerOpen, openLaunch, providersOpen } from './dialogs'
 import LaunchDialog from './LaunchDialog.vue'
 import LaunchLogDialog from './LaunchLogDialog.vue'
 import WorkerCard from './WorkerCard.vue'
@@ -46,6 +47,9 @@ onActivated(() => {
     <div class="page-head">
       <div class="page-title"><h2>{{ t('compute.title') }}</h2><p class="page-sub" :title="offlineTip">{{ summary }}</p></div>
       <div class="page-actions">
+        <NButton @click="addWorkerOpen = true">
+          <template #icon><AppIcon name="plus" /></template>{{ t('compute.addWorker') }}
+        </NButton>
         <NButton @click="providersOpen = true">
           <template #icon><AppIcon name="cloud" /></template>{{ t('cloud.platform') }}<span v-if="providerCount" class="btn-count" style="margin-left: 6px">{{ providerCount }}</span>
         </NButton>
@@ -81,6 +85,7 @@ onActivated(() => {
       <CloudInstances />
     </div>
 
+    <AddWorkerDialog />
     <CloudBindDialog />
     <CloudProvidersDialog />
     <LaunchDialog />

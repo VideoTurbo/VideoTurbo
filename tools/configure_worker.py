@@ -8,6 +8,8 @@ line by line so the template's comments and the remaining settings stay intact.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import re
 import shutil
@@ -93,19 +95,52 @@ def _ask(prompt: str, default: str = "") -> str:
     return answer or default
 
 
+CONNECTION_PREFIX = "VT1:"
+
+
+def decode_connection(text: str) -> tuple[str, str] | None:
+    """解析控制台“云主机 → 添加显卡电脑”给出的接入串（地址 + 接入密钥）；不是接入串时返回 None。
+
+    格式与 src/video_turbo/connection_string.py 相同；这里只能用标准库，所以单独实现一份。
+    """
+    text = "".join(text.split())
+    if not text.upper().startswith(CONNECTION_PREFIX):
+        return None
+    body = text[len(CONNECTION_PREFIX):]
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return None
+    url = payload.get("u") if isinstance(payload, dict) else None
+    token = payload.get("t") if isinstance(payload, dict) else None
+    if not (isinstance(url, str) and re.match(r"^https?://\S+$", url) and isinstance(token, str) and token.strip()):
+        return None
+    return url.rstrip("/"), token.strip()
+
+
 def prompt_values(values: dict[str, str], default_root: str) -> dict[str, str]:
     result = dict(values)
     print("\n请填写本机的服务配置；方括号内为默认值，直接回车即可使用。", flush=True)
 
     default = values["server_url"]
+    connected = False
     while True:
-        url = _ask("主程序地址 server_url（例如 http://192.168.1.10:8765）", default)
+        url = _ask("接入串或主程序地址 server_url（接入串在控制台“云主机 → 添加显卡电脑”里复制）", default)
+        if url.strip().upper().startswith(CONNECTION_PREFIX):
+            decoded = decode_connection(url)
+            if decoded is None:
+                print("  接入串无效，请重新复制。", flush=True)
+                continue
+            result["server_url"], result["worker_token"] = decoded
+            connected = True
+            print(f"  已从接入串读取：{decoded[0]}", flush=True)
+            break
         if re.match(r"^https?://\S+$", url):
             result["server_url"] = url.rstrip("/")
             break
-        print("  地址需以 http:// 或 https:// 开头。", flush=True)
+        print("  请粘贴接入串，或填写以 http:// 或 https:// 开头的地址。", flush=True)
 
-    while True:
+    while not connected:
         hint = "（已设置，回车保留）" if values["worker_token"] else "（从主程序控制台“设置 → 云主机 → 接入密钥”复制）"
         token = _ask(f"接入密钥 worker_token{hint}")
         token = token or values["worker_token"]
@@ -130,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--default-download-root", required=True)
     parser.add_argument(
         "--shared-machine", action="store_true",
-        help="新建配置时开启空闲检测（与日常使用共用显卡的电脑，Windows 安装脚本使用）",
+        help="新建配置时开启空闲检测（与日常使用共用显卡的电脑）",
     )
     parser.add_argument(
         "--non-interactive", action="store_true",

@@ -19,6 +19,8 @@ pub struct ServerSettings {
     pub backup_dir: Option<PathBuf>,
     /// 安全模式：启动时不加载控制台里安装的插件。
     pub safe_mode: bool,
+    /// 本机识别：这台电脑也作为显卡电脑处理识别任务（运行环境第一次开启时下载）。
+    pub local_worker: bool,
 }
 
 impl Default for ServerSettings {
@@ -29,6 +31,7 @@ impl Default for ServerSettings {
             lan_console: false,
             backup_dir: None,
             safe_mode: false,
+            local_worker: false,
         }
     }
 }

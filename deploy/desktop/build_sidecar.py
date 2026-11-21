@@ -8,7 +8,8 @@
 
 - server/：PyInstaller 打包的主程序文件夹，入口是 videoturbo-server(.exe)
 - ffmpeg/：ffmpeg、ffprobe 及其许可证
-- worker-bundle/：开云机时推送到实例的 Linux Worker 源码，内容与 Docker 镜像里的 /app/bundle 相同
+- worker-bundle/：识别程序的源码。开云机时推送到实例，本机识别和识别机应用也从这里安装；内容与 Docker 镜像里的 /app/bundle 相同
+- uv/：安装本机识别运行环境用的 uv
 """
 
 from __future__ import annotations
@@ -16,11 +17,14 @@ from __future__ import annotations
 import argparse
 import gzip
 import hashlib
+import io
 import platform
 import shutil
 import subprocess
 import sys
+import tarfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +46,14 @@ FFMPEG_FILES = {
         "ffprobe-win32-x64.gz": "f309e6223ad89d2fe54bccd420a7709b66fd27540674e92309578ed491a43c8d",
         "win32-x64.LICENSE": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
     },
+}
+
+
+# uv 0.13.6 的发布文件，按 SHA-256 校验。本机识别用它下载 Python 3.11 和安装依赖。
+UV_RELEASE = "https://github.com/astral-sh/uv/releases/download/0.13.6"
+UV_FILES = {
+    "darwin-arm64": ("uv-aarch64-apple-darwin.tar.gz", "60fbd5c8a1ed681845eea28d9d622fcde03c51e91a43465b64a1e17db1ed3472"),
+    "win32-x64": ("uv-x86_64-pc-windows-msvc.zip", "a2a8820d5eea32f08ef467ef3b7f66883a9b076d5737a2fc2fbb5f458d1bb50f"),
 }
 
 
@@ -85,12 +97,12 @@ def build_server(output: Path) -> None:
     shutil.copytree(work / "dist" / "videoturbo-server", output, symlinks=True)
 
 
-def _download(name: str, expected: str) -> Path:
-    path = CACHE / "ffmpeg" / name
+def _download(name: str, expected: str, release: str = FFMPEG_RELEASE) -> Path:
+    path = CACHE / "downloads" / name
     if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
         path.parent.mkdir(parents=True, exist_ok=True)
         log(f"下载 {name}")
-        with urllib.request.urlopen(f"{FFMPEG_RELEASE}/{name}", timeout=120) as response:
+        with urllib.request.urlopen(f"{release}/{name}", timeout=120) as response:
             data = response.read()
         actual = hashlib.sha256(data).hexdigest()
         if actual != expected:
@@ -112,6 +124,29 @@ def fetch_ffmpeg(platform_key: str, output: Path) -> None:
             target_path.chmod(0o755)
         else:
             shutil.copyfile(source, output / ("FFMPEG-" + name.split(".", 1)[1]))
+
+
+def fetch_uv(platform_key: str, output: Path) -> None:
+    name, digest = UV_FILES[platform_key]
+    archive = _download(name, digest, UV_RELEASE)
+    shutil.rmtree(output, ignore_errors=True)
+    output.mkdir(parents=True)
+    wanted = {"uv", "uv.exe", "uvx", "uvx.exe"}
+    data = archive.read_bytes()
+    if name.endswith(".zip"):
+        with zipfile.ZipFile(io.BytesIO(data)) as bundle:
+            for member in bundle.namelist():
+                if Path(member).name in wanted:
+                    (output / Path(member).name).write_bytes(bundle.read(member))
+    else:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as bundle:
+            for member in bundle.getmembers():
+                if member.isfile() and Path(member.name).name in wanted:
+                    target = output / Path(member.name).name
+                    target.write_bytes(bundle.extractfile(member).read())
+                    target.chmod(0o755)
+    if not any((output / name).is_file() for name in ("uv", "uv.exe")):
+        raise SystemExit(f"{name} 里没有找到 uv。")
 
 
 def copy_worker_bundle(output: Path) -> None:
@@ -145,6 +180,7 @@ def main() -> None:
             build_dashboard()
         build_server(RESOURCES / "server")
     fetch_ffmpeg(platform_key, RESOURCES / "ffmpeg")
+    fetch_uv(platform_key, RESOURCES / "uv")
     copy_worker_bundle(RESOURCES / "worker-bundle")
     log(f"完成：{RESOURCES}")
 

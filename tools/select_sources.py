@@ -1,6 +1,6 @@
 """为 Worker 安装和运行挑选下载源：每类资源有官方源和镜像，用前花几秒测速后自动选择。
 
-只依赖标准库，由 worker.sh、worker.ps1 和 install_whisperjav.py 调用。
+只依赖标准库，由 worker.sh、desktop_worker.py（桌面版）和 install_whisperjav.py 调用。
 普通下载源只读取前 256 KB；模型源用实际模型文件的 HEAD 响应验证元数据。
 所有候选并行，总耗时不超过 PROBE_SECONDS 多一点。
 设置对应的环境变量可固定地址并跳过测速（VIDEO_TURBO_GITHUB_PROXY=direct 表示直连 GitHub）。
