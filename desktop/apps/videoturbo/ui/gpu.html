@@ -13,8 +13,26 @@
     .gpu { color: var(--muted); font-size: 13px; margin-top: 2px; }
     p { font-size: 13px; margin: 0 0 10px; }
     .help { font-size: 12px; color: var(--muted); }
-    .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
-    .actions button { width: 100%; padding: 8px 16px; }
+    .actions { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
+    .picker { margin: 10px 0 0; padding: 4px 12px 10px; border: 1px solid var(--line); border-radius: 8px; }
+    .picker .models-head { padding-top: 8px; }
+    .models-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .models-head h3 { font-size: 14px; margin: 0; }
+    .models-mode { font-size: 12px; color: var(--muted); }
+    .model-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+    .model-row:first-child { border-top: 0; }
+    .model-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .model-text small { color: var(--muted); font-size: 11.5px; }
+    .model-size { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .model-done { color: var(--good, #2f9e44); font-size: 12px; white-space: nowrap; }
+    .model-remove { padding: 2px 8px; font-size: 12px; }
+    .tag { font-size: 11px; padding: 1px 6px; border-radius: 5px; background: var(--accent); color: #fff; white-space: nowrap; }
+    .models-rows { margin-top: 6px; }
+    .models-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+    .picker { margin: 10px 0; padding: 4px 12px 10px; border: 1px solid var(--line); border-radius: 8px; }
+    .picker .models-head { padding-top: 8px; }
+    .models-note { font-size: 12px; color: var(--muted); flex: 1; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
@@ -25,28 +43,40 @@
     </div>
     <p id="lead"></p>
     <p class="help" id="help"></p>
+    <div id="models" class="picker" hidden></div>
     <div class="actions">
-      <button class="primary" id="now"></button>
-      <button id="later"></button>
       <button id="no"></button>
+      <button id="later"></button>
+      <button class="primary" id="now"></button>
     </div>
   </main>
+  <script src="models.js"></script>
   <script>
     const zh = (navigator.language || '').toLowerCase().startsWith('zh')
     const T = zh ? {
       title: '检测到 NVIDIA 显卡', lead: '要用这块显卡识别字幕吗？开启后这台电脑会自动处理识别任务，不用另装显卡电脑。',
-      help: '需要下载运行环境（约 3.6 GB）和当前识别模式需要的模型（默认的 WhisperJAV 双遍约 7.2 GB），之后不用再下载；也可以先开启，稍后在托盘菜单“本机识别…”里选择要下载的模型。只在显卡空闲时接单，不影响打游戏。',
+      help: '需要下载运行环境（约 3.6 GB）和下面勾选的模型（默认勾选当前识别模式需要的），之后不用再下载；可以现在下载，也可以先开启、稍后再下载。只在显卡空闲时接单，不影响打游戏。',
       now: '开启并立即下载', later: '开启，稍后再下载', no: '暂不开启',
     } : {
       title: 'NVIDIA GPU detected', lead: 'Use this GPU to recognize subtitles? This computer then processes recognition jobs itself, no separate GPU PC needed.',
-      help: 'This downloads the program environment (about 3.6 GB) and the models the current recognition mode needs (WhisperJAV two-pass, the default, about 7.2 GB) once; or turn it on now and pick models later under Local recognition… in the tray menu. Jobs are only taken while the GPU is idle.',
+      help: 'This downloads the program environment (about 3.6 GB) and the models ticked below (those the current recognition mode needs are ticked) once; download now, or turn it on and download later. Jobs are only taken while the GPU is idle.',
       now: 'Turn on and download now', later: 'Turn on, download later', no: 'Not now',
     }
     const { invoke } = window.__TAURI__.core
     const $ = (id) => document.getElementById(id)
     for (const key of ['title', 'lead', 'help', 'now', 'later', 'no']) $(key).textContent = T[key]
-    invoke('gpu_prompt').then((info) => { $('gpu').textContent = info.name || '' })
-    for (const choice of ['now', 'later', 'no']) $(choice).onclick = () => invoke('gpu_choose', { choice })
+    const picker = window.ModelList($('models'), {}, { picker: true })
+    // 弹窗可能比主程序先就绪：读不到当前识别模式时每 2 秒再问一次，最多 30 秒。
+    async function load(tries) {
+      const info = await invoke('gpu_prompt')
+      $('gpu').textContent = info.name || ''
+      picker(info.catalog, false)
+      if (!info.catalog.mode && tries > 0) setTimeout(() => load(tries - 1), 2000)
+    }
+    load(15)
+    for (const choice of ['now', 'later', 'no']) {
+      $(choice).onclick = () => invoke('gpu_choose', { choice, models: choice === 'no' ? null : picker.selection() })
+    }
   </script>
 </body>
 </html>

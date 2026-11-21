@@ -75,9 +75,20 @@ def test_install_runs_the_steps_in_order(tmp_path: Path, monkeypatch, capsys) ->
             requirements.append(Path(command[command.index("-r") + 1]).read_text(encoding="utf-8"))
 
     monkeypatch.setattr(tool, "_run", run)
+    copies: list[tuple[Path, Path]] = []
+
+    def copy(source: Path, target: Path) -> Path:
+        copies.append((source, target))
+        target.mkdir(parents=True)
+        return target
+
+    monkeypatch.setattr(tool, "writable_copy", copy)
     root = tmp_path / "worker"
     assert tool.main(["install", "--root", str(root), "--bundle", str(PROJECT), "--uv", "uv",
                       "--python", "py311", "--ffmpeg-dir", str(tmp_path / "ffmpeg"), "--device", "cpu"]) == 0
+    # 安装包目录可能只读（C:\Program Files）：识别程序从可写的副本构建，装完删除副本。
+    assert copies == [(PROJECT, root / "build-src")] and commands[2][-1] == str(root / "build-src")
+    assert not (root / "build-src").exists()
     assert [command[:2] for command in commands] == [
         ["uv", "venv"], ["uv", "pip"], ["uv", "pip"], [str(tool.Layout.python(root / ".venv")), commands[3][1]],
     ]
@@ -172,3 +183,22 @@ def test_runtime_can_be_installed_on_demand(tmp_path: Path, monkeypatch, capsys)
     assert tool.main(["install-runtime", "--root", str(root), "--bundle", str(PROJECT), "--uv", "uv"]) == 0
     assert "nvidia-cudnn-cu12==" in installed[0] and "faster-whisper" not in installed[0].split("# via")[0]
     assert events(capsys.readouterr().out)[-1] == {"event": "done"}
+
+
+def test_writable_copy_of_a_read_only_bundle(tmp_path: Path) -> None:
+    tool = load_tool()
+    source = tmp_path / "bundle"
+    (source / "src" / "pkg" / "__pycache__").mkdir(parents=True)
+    (source / "src" / "pkg" / "__init__.py").write_text("")
+    (source / "src" / "pkg" / "__pycache__" / "x.pyc").write_text("")
+    for path in [*source.rglob("*"), source]:
+        path.chmod(0o555 if path.is_dir() else 0o444)
+    try:
+        copy = tool.writable_copy(source, tmp_path / "copy")
+        assert (copy / "src" / "pkg" / "__init__.py").is_file()
+        assert not (copy / "src" / "pkg" / "__pycache__").exists()
+        (copy / "src" / "pkg.egg-info").mkdir()  # 构建时要写的临时文件
+        (copy / "src" / "pkg" / "__init__.py").write_text("x")
+    finally:
+        for path in [source, *source.rglob("*")]:
+            path.chmod(0o755)

@@ -40,6 +40,8 @@
     .models-rows { margin-top: 6px; }
     .models-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; }
     .models-note { font-size: 12px; color: var(--muted); flex: 1; }
+    .picker { margin: 10px 0 0; padding: 4px 12px 10px; border: 1px solid var(--line); border-radius: 8px; }
+    .picker .models-head { padding-top: 8px; }
     .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }
     [hidden] { display: none !important; }
   </style>
@@ -57,6 +59,7 @@
       <textarea id="code" spellcheck="false"></textarea>
       <p class="warn" id="code-error" hidden></p>
       <p class="help" id="t-download"></p>
+      <div id="pick" class="picker"></div>
       <div class="actions">
         <button id="cancel-change" hidden></button>
         <button id="connect-later"></button>
@@ -92,7 +95,7 @@
     const T = zh ? {
       sub: '让这台显卡电脑为 VideoTurbo 识别字幕', setup: '连接主程序',
       step1: '在 VideoTurbo 控制台打开“云主机 → 添加显卡电脑”，复制接入串。', step2: '粘贴到下面，点“连接”。',
-      download: '需要下载运行环境（约 3.6 GB）和主程序当前识别模式需要的模型（默认的 WhisperJAV 双遍约 7.2 GB，单遍约 4.4 GB，faster-whisper 约 2.9 GB），之后不用再下载；可以现在下载，也可以先连接、等方便时再下载。与桌面、游戏共用显卡时，只在显卡空闲时接单。',
+      download: '需要下载运行环境（约 3.6 GB）和下面勾选的模型（粘贴接入串后按主程序当前的识别模式勾选），之后不用再下载；可以现在下载，也可以先连接、等方便时再下载。与桌面、游戏共用显卡时，只在显卡空闲时接单。',
       connect: '连接并立即下载', connectLater: '连接，稍后下载', cancel: '取消', placeholder: 'VT1:…',
       pending: '等待下载', pendingHint: '还没有下载运行环境或识别模型，下载好之前不会接识别任务。方便时点“开始下载”，或在下面的清单里选模型下载。', startDownload: '开始下载',
       off: '已暂停接单', waiting: '正在连接主程序…', installing: '正在安装运行环境', models: '正在下载模型', selfTest: '正在自检已下载的模型', modelStep: '{name}：{done} / {total}',
@@ -104,7 +107,7 @@
     } : {
       sub: 'Let this GPU computer recognize subtitles for VideoTurbo', setup: 'Connect to the main app',
       step1: 'In the VideoTurbo console, open Cloud hosts → Add GPU computer and copy the connection code.', step2: 'Paste it below and click Connect.',
-      download: 'The program environment (about 3.6 GB) and the models the main app\'s current recognition mode needs (WhisperJAV two-pass, the default, about 7.2 GB; single-pass about 4.4 GB; faster-whisper about 2.9 GB) are downloaded once; download now, or connect first and download when convenient. When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
+      download: 'The program environment (about 3.6 GB) and the models ticked below (after pasting the code, those the main app\'s current recognition mode needs are ticked) are downloaded once; download now, or connect first and download when convenient. When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
       connect: 'Connect and download now', connectLater: 'Connect, download later', cancel: 'Cancel', placeholder: 'VT1:…',
       pending: 'Waiting to download', pendingHint: "The program environment or models aren't downloaded yet; no recognition jobs are taken until they are. Click \"Download now\" when convenient, or pick models in the list below.", startDownload: 'Download now',
       off: 'Paused', waiting: 'Connecting to the main app…', installing: 'Installing the program environment', models: 'Downloading models', selfTest: 'Testing the downloaded models', modelStep: '{name}: {done} / {total}',
@@ -128,10 +131,19 @@
     })
     invoke('models_refresh')
 
+    const picker = window.ModelList($('pick'), {}, { picker: true })
+    let lookup = null
+    async function loadChoices() {
+      picker(await invoke('model_choices', { code: $('code').value.trim() || null }), false)
+    }
+    // 粘贴接入串后按主程序当前的识别模式重新勾选。
+    $('code').oninput = () => { clearTimeout(lookup); lookup = setTimeout(loadChoices, 500) }
+    loadChoices()
+
     async function connect(download) {
       $('code-error').hidden = true
       try {
-        await invoke('connect', { code: $('code').value, download })
+        await invoke('connect', { code: $('code').value, download, models: picker.selection() })
         changing = false
         $('code').value = ''
         refresh()

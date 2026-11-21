@@ -25,6 +25,8 @@ pub struct ServerSettings {
     pub local_worker_download: bool,
     /// 已经问过“检测到显卡，要不要开启本机识别”，不再弹出。
     pub gpu_prompted: bool,
+    /// 开启本机识别时在下载前选的模型；第一次下载模型时用，之后在模型清单里管理。
+    pub local_worker_models: Vec<String>,
 }
 
 impl Default for ServerSettings {
@@ -38,6 +40,7 @@ impl Default for ServerSettings {
             local_worker: false,
             local_worker_download: false,
             gpu_prompted: false,
+            local_worker_models: Vec::new(),
         }
     }
 }

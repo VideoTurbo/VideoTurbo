@@ -28,6 +28,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import urllib.request
@@ -154,6 +155,16 @@ def split_cuda_runtime(text: str) -> tuple[str, str]:
     return "".join(keep), "".join(runtime)
 
 
+def writable_copy(source: Path, target: Path) -> Path:
+    """复制源码目录，并确保副本可写（原目录可能是只读的）。"""
+    shutil.rmtree(target, ignore_errors=True)
+    shutil.copytree(source, target, copy_function=shutil.copyfile,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.egg-info", "build", "dist"))
+    for path in [target, *target.rglob("*")]:
+        path.chmod(path.stat().st_mode | stat.S_IWUSR)
+    return target
+
+
 def _run(command: list[str], env: dict[str, str]) -> None:
     print("$ " + " ".join(command), flush=True)
     subprocess.run(command, env=env, check=True)
@@ -201,8 +212,13 @@ def install(args: argparse.Namespace) -> None:
     requirements.unlink(missing_ok=True)
 
     step(4)
-    # 版本号没变时也强制替换，避免继续用旧代码。
-    _run([str(args.uv), "pip", "install", "--python", str(python), "--no-deps", "--reinstall", str(bundle)], env)
+    # 安装包在 C:\Program Files 下是只读的，构建时又要在源码目录里写临时文件，所以先复制到可写的文件夹。
+    source = writable_copy(bundle, layout.root / "build-src")
+    try:
+        # 版本号没变时也强制替换，避免继续用旧代码。
+        _run([str(args.uv), "pip", "install", "--python", str(python), "--no-deps", "--reinstall", str(source)], env)
+    finally:
+        shutil.rmtree(source, ignore_errors=True)
 
     step(5)
     _run([str(python), str(bundle / "tools" / "install_whisperjav.py"), "--venv", str(layout.backend),

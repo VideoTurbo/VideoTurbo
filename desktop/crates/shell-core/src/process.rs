@@ -260,6 +260,38 @@ pub fn http_request(
     Some((status, body.to_string()))
 }
 
+/// `http://主机:端口/路径` 的 GET（只支持 http），返回状态码和响应体。用于识别机应用连接前读取主程序的识别模式。
+pub fn http_get_url(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Option<(u16, String)> {
+    let rest = url.strip_prefix("http://")?;
+    let (authority, path) = match rest.find('/') {
+        Some(index) => (&rest[..index], &rest[index..]),
+        None => (rest, "/"),
+    };
+    let address =
+        std::net::ToSocketAddrs::to_socket_addrs(&if authority.contains(':') && !authority.ends_with(']') {
+            authority.to_string()
+        } else {
+            format!("{authority}:80")
+        })
+        .ok()?
+        .next()?;
+    let mut stream = TcpStream::connect_timeout(&address, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    let mut request = format!("GET {path} HTTP/1.0\r\nHost: {authority}\r\nConnection: close\r\n");
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).ok()?;
+    let text = String::from_utf8_lossy(&response);
+    let (head, body) = text.split_once("\r\n\r\n")?;
+    let status = head.split_whitespace().nth(1)?.parse().ok()?;
+    Some((status, body.to_string()))
+}
+
 /// 端口能否在这个地址上监听（启动前检查，给出“端口被占用”的明确提示）。
 pub fn port_free(host: [u8; 4], port: u16) -> bool {
     TcpListener::bind(SocketAddr::from((host, port))).is_ok()

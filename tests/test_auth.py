@@ -288,7 +288,8 @@ def test_desktop_shell_can_fetch_worker_token(desktop) -> None:
         assert local.get("/api/auth/desktop/worker").status_code == 403
         assert local.get("/api/auth/desktop/worker", headers={auth.DESKTOP_TOKEN_HEADER: "x"}).status_code == 403
         response = local.get("/api/auth/desktop/worker", headers=header)
-        assert response.json() == {"worker_token": "worker-secret", "worker_port": 8766}
+        assert response.json() == {"worker_token": "worker-secret", "worker_port": 8766,
+                                   "asr_mode": "whisperjav", "whisperjav_ensemble": True}
     with desktop("192.168.1.20") as remote:
         assert remote.get("/api/auth/desktop/worker", headers=header).status_code == 403
 

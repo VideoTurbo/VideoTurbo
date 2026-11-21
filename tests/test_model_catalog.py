@@ -169,3 +169,16 @@ def test_desktop_worker_only_offers_modes_whose_models_are_downloaded(tmp_path: 
         model_catalog.delete(config, model)
     assert worker.supported_asr_modes() == ["whisperjav", "faster_whisper"]
     assert worker.supports_whisperjav_ensemble() is True
+
+
+def test_shell_defaults_match_the_catalog(tmp_path: Path) -> None:
+    # 运行环境装好之前，外壳用这份默认清单让用户选模型。
+    project = Path(__file__).resolve().parents[1]
+    defaults = json.loads((project / "desktop" / "crates" / "shell-core" / "src" / "default_models.json").read_text(
+        encoding="utf-8"))
+    catalog = [
+        {"id": m.id, "zh": m.zh, "en": m.en, "purpose_zh": m.purpose_zh, "purpose_en": m.purpose_en,
+         "size_mb": m.size_mb()}
+        for m in model_catalog.catalog(WorkerConfig())
+    ]
+    assert defaults == catalog

@@ -17,7 +17,7 @@ use serde::Serialize;
 
 use crate::connection::Connection;
 use crate::logfile::{self, Logger};
-use crate::models::ModelStatus;
+use crate::models::{self, ModeInfo, ModelStatus};
 use crate::process::{self, Cancel, Running};
 use crate::worker_env::{Event, InstallError, WorkerEnv};
 
@@ -79,8 +79,6 @@ struct Inner {
     generation: u64,
     /// 结束这一轮正在运行的安装或自检（连同 uv、pip 等子进程）。
     cancel: Arc<Cancel>,
-    /// 用户在清单里点了下载的模型，这一轮开始时取走。
-    requested: Option<Vec<String>>,
 }
 
 pub struct WorkerManager {
@@ -108,7 +106,6 @@ impl WorkerManager {
                 lock: None,
                 generation: 0,
                 cancel: Arc::new(Cancel::default()),
-                requested: None,
             }),
             notify,
             catalog: Mutex::new(None),
@@ -214,6 +211,17 @@ impl WorkerManager {
     /// 开启（或按新的接入信息重新开始）。`connect` 为 None 时沿用已写好的配置。
     /// `allow_download` 为 false 时，还要下载运行环境或模型就停在“待下载”（用户选了稍后下载）。
     pub fn start(self: &Arc<Self>, connect: Option<Connect>, allow_download: bool) {
+        self.start_with(connect, allow_download, None);
+    }
+
+    /// 同 start；`models` 是用户点了下载、或第一次设置时在下载前选的模型，允许下载时下载这些
+    /// （没有给出时，第一次设置按当前识别模式下载）。
+    pub fn start_with(
+        self: &Arc<Self>,
+        connect: Option<Connect>,
+        allow_download: bool,
+        models: Option<Vec<String>>,
+    ) {
         let (generation, previous, cancel) = {
             let mut inner = self.lock();
             inner.generation += 1;
@@ -227,13 +235,22 @@ impl WorkerManager {
         }
         self.set(generation, WorkerPhase::Waiting);
         let manager = Arc::clone(self);
-        thread::spawn(move || manager.run(generation, connect, cancel, allow_download));
+        thread::spawn(move || manager.run(generation, connect, cancel, allow_download, models));
     }
 
     /// 下载清单里选的模型：停下识别程序，下载、自检后重新启动。
     pub fn download_models(self: &Arc<Self>, connect: Option<Connect>, ids: Vec<String>) {
-        self.lock().requested = Some(ids);
-        self.start(connect, true);
+        self.start_with(connect, true, Some(ids));
+    }
+
+    /// 已经下载过模型（不是第一次设置）。
+    pub fn has_models(&self) -> bool {
+        self.models().is_some_and(|catalog| !catalog.downloaded().is_empty())
+    }
+
+    /// 让用户选模型用的清单：运行环境装好后是实际的清单，之前是按当前识别模式勾选的默认清单。
+    pub fn choices(&self, mode: impl FnOnce() -> Option<ModeInfo>) -> ModelStatus {
+        self.models().unwrap_or_else(|| models::default_catalog(mode()))
     }
 
     /// 删除模型：停下识别程序（Windows 上正在用的文件删不掉），删除后不下载任何东西，重新启动。
@@ -286,11 +303,11 @@ impl WorkerManager {
         connect: Option<Connect>,
         cancel: Arc<Cancel>,
         allow_download: bool,
+        requested: Option<Vec<String>>,
     ) {
-        let requested = self.lock().requested.take();
         let installed = !self.env.needs_install();
         let ready = installed && self.refresh_models().is_some_and(|catalog| self.self_test_covers(&catalog));
-        if !allow_download && requested.is_none() && !ready {
+        if !allow_download && !ready {
             self.set(generation, WorkerPhase::Pending);
             return;
         }

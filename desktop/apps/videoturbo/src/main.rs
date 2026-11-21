@@ -25,7 +25,7 @@ use tauri_plugin_opener::OpenerExt as _;
 
 use server::{Paths, Phase, Server};
 use shell_core::connection::Connection;
-use shell_core::models::ModelStatus;
+use shell_core::models::{ModeInfo, ModelStatus};
 use shell_core::worker_env::WorkerEnv;
 use shell_core::worker_manager::{Connect, WorkerManager, WorkerPhase};
 use shell_tauri::updater::{self, UpdateMenu};
@@ -142,7 +142,7 @@ fn prompt_gpu_once(app: &AppHandle) {
             let title = shell(&handle).texts.local_worker_title();
             let _ = WebviewWindowBuilder::new(&handle, GPU, WebviewUrl::App("gpu.html".into()))
                 .title(title)
-                .inner_size(480.0, 400.0)
+                .inner_size(560.0, 580.0)
                 .resizable(false)
                 .always_on_top(true)
                 .build();
@@ -420,27 +420,41 @@ fn download_needed(app: &AppHandle) -> Result<(), String> {
     let missing = state.worker.models().filter(|catalog| !catalog.downloaded().is_empty()).map(|c| c.missing);
     match missing {
         Some(ids) if !ids.is_empty() => worker_models_download(app.clone(), ids),
-        _ => set_local_worker(app, true, true),
+        _ => set_local_worker(app, true, true, None),
     }
 }
 
 /// 开启或关闭本机识别；失败后再点开启即重试。`download` 为 false 时（稍后下载）停在“待下载”。
 #[tauri::command]
-fn worker_set(app: AppHandle, enabled: bool, download: bool) -> Result<(), String> {
-    set_local_worker(&app, enabled, download)
+fn worker_set(
+    app: AppHandle,
+    enabled: bool,
+    download: bool,
+    models: Option<Vec<String>>,
+) -> Result<(), String> {
+    set_local_worker(&app, enabled, download, models)
 }
 
-fn set_local_worker(app: &AppHandle, enabled: bool, download: bool) -> Result<(), String> {
+/// 开启或关闭本机识别。`models` 是下载前选的模型（保存起来，稍后下载时也用它）。
+fn set_local_worker(
+    app: &AppHandle,
+    enabled: bool,
+    download: bool,
+    models: Option<Vec<String>>,
+) -> Result<(), String> {
     let state = shell(app);
     let settings = state
         .server
         .update_flags(|settings| {
             settings.local_worker = enabled;
             settings.local_worker_download |= enabled && download;
+            if let Some(models) = models {
+                settings.local_worker_models = models;
+            }
         })
         .map_err(|error| error.to_string())?;
     if enabled {
-        state.worker.start(Some(local_connection(Arc::clone(&state.server))), settings.local_worker_download);
+        start_local_worker(&state, &settings);
     } else {
         let worker = Arc::clone(&state.worker);
         std::thread::spawn(move || worker.stop());
@@ -517,32 +531,73 @@ fn report_local_worker(app: AppHandle) {
     });
 }
 
+/// 按设置启动本机识别。还没下载过模型时，下载开启前选的模型（没选过就按当前识别模式）。
+fn start_local_worker(state: &Shell, settings: &ServerSettings) {
+    let chosen = (!state.worker.has_models() && !settings.local_worker_models.is_empty())
+        .then(|| settings.local_worker_models.clone());
+    state.worker.start_with(
+        Some(local_connection(Arc::clone(&state.server))),
+        settings.local_worker_download,
+        chosen,
+    );
+}
+
+/// 主程序的当前识别模式（开启本机识别前勾选默认要下载的模型）。
+fn local_mode(server: &Server) -> Option<ModeInfo> {
+    #[derive(Deserialize)]
+    struct Access {
+        asr_mode: String,
+        whisperjav_ensemble: bool,
+    }
+    let (port, token) = server.ready()?;
+    let reply = shell_core::process::http_get(
+        port,
+        "/api/auth/desktop/worker",
+        &[("X-VideoTurbo-Desktop-Token", &token)],
+        std::time::Duration::from_secs(5),
+    );
+    let Some((200, body)) = reply else { return None };
+    let access: Access = serde_json::from_str(&body).ok()?;
+    Some(ModeInfo { mode: access.asr_mode, whisperjav_ensemble: access.whisperjav_ensemble, live: true })
+}
+
+/// 让用户选模型的清单：运行环境装好后是实际清单，之前是按当前识别模式勾选的默认清单。
+#[tauri::command]
+fn worker_model_choices(app: AppHandle) -> ModelStatus {
+    let state = shell(&app);
+    state.worker.choices(|| local_mode(&state.server))
+}
+
 /// “待下载”时点“开始下载”。
 #[tauri::command]
 fn worker_download(app: AppHandle) -> Result<(), String> {
-    set_local_worker(&app, true, true)
+    set_local_worker(&app, true, true, None)
 }
 
 #[derive(Serialize)]
 struct GpuPrompt {
     name: Option<String>,
+    catalog: ModelStatus,
 }
 
 #[tauri::command]
 fn gpu_prompt(app: AppHandle) -> GpuPrompt {
-    let _ = &app;
-    GpuPrompt { name: shell_core::worker_env::nvidia_gpu_name() }
+    let state = shell(&app);
+    GpuPrompt {
+        name: shell_core::worker_env::nvidia_gpu_name(),
+        catalog: state.worker.choices(|| local_mode(&state.server)),
+    }
 }
 
 /// 检测到显卡时的选择：now 开启并立即下载，later 开启但稍后下载，no 不开启。
 #[tauri::command]
-fn gpu_choose(app: AppHandle, choice: String) -> Result<(), String> {
+fn gpu_choose(app: AppHandle, choice: String, models: Option<Vec<String>>) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(GPU) {
         let _ = window.destroy();
     }
     match choice.as_str() {
-        "now" => set_local_worker(&app, true, true),
-        "later" => set_local_worker(&app, true, false),
+        "now" => set_local_worker(&app, true, true, models),
+        "later" => set_local_worker(&app, true, false, models),
         _ => Ok(()),
     }
 }
@@ -607,10 +662,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(state) = handle.try_state::<Shell>() {
                         let settings = state.server.settings();
                         if settings.local_worker {
-                            state.worker.start(
-                                Some(local_connection(Arc::clone(&state.server))),
-                                settings.local_worker_download,
-                            );
+                            start_local_worker(&state, &settings);
                         }
                     }
                 });
@@ -696,6 +748,7 @@ fn main() {
             worker_models_download,
             worker_model_delete,
             worker_models_refresh,
+            worker_model_choices,
             gpu_prompt,
             gpu_choose
         ])

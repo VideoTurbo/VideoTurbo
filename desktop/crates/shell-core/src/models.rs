@@ -57,6 +57,58 @@ impl ModelStatus {
     }
 }
 
+/// 运行环境装好之前用的默认清单（与 Python 的模型清单一致，tests/test_model_catalog.py 检查）。
+const DEFAULT_MODELS: &str = include_str!("default_models.json");
+
+#[derive(Deserialize)]
+struct DefaultModel {
+    id: String,
+    zh: String,
+    en: String,
+    purpose_zh: String,
+    purpose_en: String,
+    size_mb: u64,
+}
+
+/// 识别模式需要的模型。
+pub fn needed(mode: Option<&ModeInfo>) -> Vec<&'static str> {
+    match mode {
+        Some(mode) if mode.mode == "whisperjav" && mode.whisperjav_ensemble => {
+            vec!["qwen3-asr", "anime-whisper"]
+        }
+        Some(mode) if mode.mode == "whisperjav" => vec!["qwen3-asr"],
+        Some(mode) if mode.mode == "faster_whisper" => vec!["faster-whisper"],
+        _ => Vec::new(),
+    }
+}
+
+/// 运行环境还没装好时的模型清单（都没下载）：按当前识别模式标出需要的模型，让用户在下载前选择。
+/// 不知道当前识别模式时按主程序的默认模式（WhisperJAV 双遍）勾选。
+pub fn default_catalog(mode: Option<ModeInfo>) -> ModelStatus {
+    let assumed = mode.clone().unwrap_or(ModeInfo {
+        mode: "whisperjav".into(),
+        whisperjav_ensemble: true,
+        live: false,
+    });
+    let wanted = needed(Some(&assumed));
+    let defaults: Vec<DefaultModel> = serde_json::from_str(DEFAULT_MODELS).unwrap_or_default();
+    let models: Vec<ModelInfo> = defaults
+        .into_iter()
+        .map(|model| ModelInfo {
+            needed: wanted.contains(&model.id.as_str()),
+            id: model.id,
+            zh: model.zh,
+            en: model.en,
+            purpose_zh: model.purpose_zh,
+            purpose_en: model.purpose_en,
+            size_mb: Some(model.size_mb),
+            downloaded: false,
+        })
+        .collect();
+    let missing = models.iter().filter(|model| model.needed).map(|model| model.id.clone()).collect();
+    ModelStatus { mode, models, missing, runtime_ready: true }
+}
+
 /// 下载进度。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelProgress {
@@ -79,7 +131,30 @@ enum Message {
     Error { message: String },
 }
 
+#[derive(Deserialize)]
+struct AsrSettings {
+    mode: String,
+    whisperjav_ensemble: bool,
+}
+
 impl WorkerEnv {
+    /// 识别机协议版本（附带的部署包里 protocol.py 的 WORKER_PROTOCOL_VERSION）。
+    fn protocol_version(&self) -> Option<String> {
+        let text = std::fs::read_to_string(self.bundle.join("src/video_turbo/protocol.py")).ok()?;
+        let line = text.lines().find(|line| line.starts_with("WORKER_PROTOCOL_VERSION ="))?;
+        Some(line.split('=').nth(1)?.trim().to_string())
+    }
+
+    /// 连接前从主程序读当前识别模式（接入地址是 http 时）；读不到返回 None。
+    pub fn fetch_mode(&self, server_url: &str, token: &str) -> Option<ModeInfo> {
+        let protocol = self.protocol_version()?;
+        let url = format!("{}/api/worker/asr-settings", server_url.trim_end_matches('/'));
+        let headers = [("X-Worker-Token", token), ("X-VideoTurbo-Protocol", protocol.as_str())];
+        let (status, body) = process::http_get_url(&url, &headers, std::time::Duration::from_secs(5))?;
+        let settings: AsrSettings = (status == 200).then(|| serde_json::from_str(&body).ok()).flatten()?;
+        Some(ModeInfo { mode: settings.mode, whisperjav_ensemble: settings.whisperjav_ensemble, live: true })
+    }
+
     fn catalog_args(&self, command: &[&str]) -> Vec<OsString> {
         let mut args: Vec<OsString> =
             vec!["-m".into(), MODULE.into(), "--config".into(), self.config_file().into()];
@@ -151,6 +226,56 @@ impl WorkerEnv {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mode_is_read_from_the_main_app_before_connecting() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 1024];
+            let size = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..size]).to_string();
+            let body = r#"{"mode": "faster_whisper", "whisperjav_ensemble": false}"#;
+            let _ = stream.write_all(format!("HTTP/1.1 200 OK\r\n\r\n{body}").as_bytes());
+            request
+        });
+        let env = WorkerEnv {
+            root: std::env::temp_dir(),
+            bundle: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.."),
+            uv: "uv".into(),
+            ffmpeg_dir: "/ffmpeg".into(),
+            language: "zh-Hans".into(),
+            config_dir: "config".into(),
+        };
+        let mode = env.fetch_mode(&format!("http://127.0.0.1:{port}/"), "tok").unwrap();
+        assert_eq!(
+            (mode.mode.as_str(), mode.whisperjav_ensemble, mode.live),
+            ("faster_whisper", false, true)
+        );
+        let request = server.join().unwrap();
+        assert!(request.starts_with("GET /api/worker/asr-settings HTTP/1.0"));
+        assert!(request.contains("X-Worker-Token: tok") && request.contains("X-VideoTurbo-Protocol: 1"));
+        // https 和连不上的地址：不知道模式。
+        assert!(env.fetch_mode("https://example.invalid", "tok").is_none());
+    }
+
+    #[test]
+    fn defaults_follow_the_recognition_mode() {
+        let mode = |mode: &str, ensemble| {
+            Some(ModeInfo { mode: mode.into(), whisperjav_ensemble: ensemble, live: true })
+        };
+        assert_eq!(default_catalog(mode("whisperjav", true)).missing, vec!["qwen3-asr", "anime-whisper"]);
+        assert_eq!(default_catalog(mode("whisperjav", false)).missing, vec!["qwen3-asr"]);
+        assert_eq!(default_catalog(mode("faster_whisper", false)).missing, vec!["faster-whisper"]);
+        // 不知道当前模式：按默认的双遍勾选，但不假装知道模式。
+        let unknown = default_catalog(None);
+        assert_eq!(unknown.missing, vec!["qwen3-asr", "anime-whisper"]);
+        assert!(unknown.mode.is_none());
+        assert_eq!(unknown.models.len(), 3);
+        assert!(unknown.models.iter().all(|model| !model.downloaded && model.size_mb.is_some()));
+    }
 
     #[test]
     fn status_json_from_the_catalog_parses() {

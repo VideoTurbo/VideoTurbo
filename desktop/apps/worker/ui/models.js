@@ -8,12 +8,16 @@
     needed: '当前模式需要', downloaded: '已下载', remove: '删除', confirm: '确认删除',
     download: '下载所选', none: '没有要下载的模型', busy: '正在下载或自检，完成后再操作',
     missing: '当前识别模式需要的模型还没下载：{names}。下载之前，这台电脑不接这个模式的任务。',
+    pickTitle: '要下载的模型', picked: '所选模型共 {size}', pickNone: '没有选模型：之后可以在“本机识别”窗口或 Worker 应用的模型清单里下载。',
+    assumed: '（还没读到主程序的识别模式，先按默认模式勾选）',
   } : {
     title: 'Recognition models', mode: 'Current recognition mode: ', unknown: "unknown (can't reach the main app)", cached: ' (last known)',
     whisperjav2: 'WhisperJAV two-pass', whisperjav1: 'WhisperJAV single-pass', faster: 'faster-whisper',
     needed: 'Needed now', downloaded: 'Downloaded', remove: 'Delete', confirm: 'Confirm delete',
     download: 'Download selected', none: 'Nothing selected', busy: 'Downloading or testing; try again when it finishes',
     missing: "Models the current recognition mode needs aren't downloaded: {names}. This computer won't take jobs in this mode until they are.",
+    pickTitle: 'Models to download', picked: 'Selected models: {size}', pickNone: 'No models selected; download them later from the model list.',
+    assumed: " (main app's mode not read yet; ticked for the default mode)",
   }
 
   function size(mb) {
@@ -21,19 +25,21 @@
     return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`
   }
 
-  function modeName(mode) {
-    if (!mode) return T.unknown
+  function modeName(mode, picker) {
+    if (!mode) return picker ? T.whisperjav2 + T.assumed : T.unknown
     const name = mode.mode === 'whisperjav' ? (mode.whisperjav_ensemble ? T.whisperjav2 : T.whisperjav1) : mode.mode === 'faster_whisper' ? T.faster : mode.mode
     return name + (mode.live ? '' : T.cached)
   }
 
   /**
    * root：放清单的元素。actions.download(ids) / actions.remove(id) 调用外壳命令。
+   * options.picker：下载前选模型（开启、连接时），不显示下载和删除按钮，用 update.selection() 取选中的模型。
    * 返回 update(catalog, busy)：catalog 是外壳给的模型清单，busy 为 true 时（安装、下载、自检中）按钮不可用。
    */
-  window.ModelList = function (root, actions) {
+  window.ModelList = function (root, actions, options = {}) {
+    const picker = !!options.picker
     root.innerHTML = `
-      <div class="models-head"><h3>${T.title}</h3><span class="models-mode"></span></div>
+      <div class="models-head"><h3>${picker ? T.pickTitle : T.title}</h3><span class="models-mode"></span></div>
       <p class="warn models-missing" hidden></p>
       <div class="models-rows"></div>
       <div class="models-foot"><span class="models-note"></span><button class="primary models-download"></button></div>`
@@ -53,10 +59,10 @@
     function render() {
       const catalog = current
       if (!catalog) return
-      root.querySelector('.models-mode').textContent = T.mode + modeName(catalog.mode)
+      root.querySelector('.models-mode').textContent = T.mode + modeName(catalog.mode, picker)
       const missing = catalog.models.filter((m) => catalog.missing.includes(m.id))
       const warn = root.querySelector('.models-missing')
-      warn.hidden = !missing.length || !catalog.models.some((m) => m.downloaded)
+      warn.hidden = picker || !missing.length || !catalog.models.some((m) => m.downloaded)
       warn.textContent = T.missing.replace('{names}', missing.map((m) => `${zh ? m.zh : m.en}（${size(m.size_mb)}）`).join(zh ? '、' : ', '))
       rows.innerHTML = ''
       for (const model of catalog.models) {
@@ -68,7 +74,7 @@
           <span class="model-text"><b></b><small></small></span>
           ${model.needed ? `<span class="tag">${T.needed}</span>` : ''}
           <span class="model-size">${size(model.size_mb)}</span>
-          ${model.downloaded ? `<span class="model-done">${T.downloaded}</span><button class="model-remove" ${working ? 'disabled' : ''}>${confirming === model.id ? T.confirm : T.remove}</button>` : ''}`
+          ${model.downloaded ? `<span class="model-done">${T.downloaded}</span>${picker ? '' : `<button class="model-remove" ${working ? 'disabled' : ''}>${confirming === model.id ? T.confirm : T.remove}</button>`}` : ''}`
         row.querySelector('b').textContent = zh ? model.zh : model.en
         row.querySelector('small').textContent = zh ? model.purpose_zh : model.purpose_en
         const box = row.querySelector('input')
@@ -91,6 +97,11 @@
       }
       const ids = selection()
       const total = catalog.models.filter((m) => ids.includes(m.id)).reduce((sum, m) => sum + (m.size_mb || 0), 0)
+      if (picker) {
+        button.hidden = true
+        note.textContent = ids.length ? T.picked.replace('{size}', size(total)) : T.pickNone
+        return
+      }
       button.textContent = ids.length ? `${T.download}（${size(total)}）` : T.download
       button.disabled = working || !ids.length
       note.textContent = working ? T.busy : ids.length ? '' : T.none
@@ -101,7 +112,7 @@
       if (ids.length) actions.download(ids)
     }
 
-    return function update(catalog, busy) {
+    function update(catalog, busy) {
       // 只在内容变化时重画，免得打断正在点的勾选框。
       const key = JSON.stringify([catalog, busy, confirming])
       if (key === root.dataset.key) return
@@ -111,5 +122,7 @@
       root.hidden = !catalog
       render()
     }
+    update.selection = selection
+    return update
   }
 })()

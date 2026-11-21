@@ -36,6 +36,8 @@ struct AppSettings {
     pending_code: Option<String>,
     /// 用户同意下载运行环境和模型。
     download_approved: bool,
+    /// 连接时在下载前选的模型；第一次下载模型时用，之后在模型清单里管理。
+    models: Option<Vec<String>>,
 }
 
 struct App {
@@ -123,13 +125,16 @@ fn open_logs_folder(handle: &AppHandle) {
 /// 按保存的状态启动：有还没写进配置的接入串就用它，否则沿用已写好的配置。
 /// 用户还没同意下载时，需要下载就停在“待下载”。
 fn resume(worker: &Arc<WorkerManager>, settings: &AppSettings) {
+    // 还没下载过模型时，下载连接时选的模型（没选过就按主程序当前的识别模式）。
+    let chosen = settings.models.clone().filter(|models| !models.is_empty() && !worker.has_models());
     if let Some(connection) = settings.pending_code.as_deref().and_then(connection::parse) {
-        worker.start(
+        worker.start_with(
             Some(Box::new(move |_alive: &dyn Fn() -> bool| Some(connection))),
             settings.download_approved,
+            chosen,
         );
     } else if worker.env().configured() {
-        worker.start(None, true);
+        worker.start_with(None, true, chosen);
     }
 }
 
@@ -295,6 +300,21 @@ fn model_delete(handle: AppHandle, id: String) {
     }
 }
 
+/// 让用户选模型的清单：运行环境装好后是实际清单，之前按主程序当前识别模式勾选默认清单
+/// （用粘贴的接入串或已保存的配置去问主程序；接入地址是 https 或连不上时按默认模式勾选）。
+#[tauri::command]
+fn model_choices(handle: AppHandle, code: Option<String>) -> shell_core::models::ModelStatus {
+    let state = app(&handle);
+    let env = state.worker.env();
+    state.worker.choices(|| {
+        let (url, token) = match code.as_deref().and_then(connection::parse) {
+            Some(connection) => (connection.server_url, connection.token),
+            None => (env.config_value("server_url")?, env.config_value("worker_token")?),
+        };
+        env.fetch_mode(&url, &token)
+    })
+}
+
 #[tauri::command]
 fn models_refresh(handle: AppHandle) {
     app(&handle).worker.refresh_models_later();
@@ -303,7 +323,12 @@ fn models_refresh(handle: AppHandle) {
 /// 用接入串连接主程序（第一次设置或更换主程序）。`download` 为 true 时立即下载运行环境和模型，
 /// 之后自检并开始接单；为 false 时先保存，停在“待下载”。
 #[tauri::command]
-fn connect(handle: AppHandle, code: String, download: bool) -> Result<(), String> {
+fn connect(
+    handle: AppHandle,
+    code: String,
+    download: bool,
+    models: Option<Vec<String>>,
+) -> Result<(), String> {
     let state = app(&handle);
     let Some(connection) = connection::parse(&code) else {
         return Err(state
@@ -320,6 +345,7 @@ fn connect(handle: AppHandle, code: String, download: bool) -> Result<(), String
         paused: false,
         pending_code: Some(code.trim().to_string()),
         download_approved: previous.download_approved || download,
+        models: models.or(previous.models),
     };
     save_settings(&state.settings_file, &settings);
     let _ = state.pause_item.set_text(state.lang.pick("暂停接单", "Pause"));
@@ -469,6 +495,7 @@ fn main() {
             models_download,
             model_delete,
             models_refresh,
+            model_choices,
             open_logs,
             install_tools
         ])
