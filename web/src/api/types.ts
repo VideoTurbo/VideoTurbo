@@ -556,6 +556,8 @@ export interface PluginConnection {
   id: string
   type: string
   type_label: string
+  /** 类型图标（data URI）；没有图标或插件不可用时为空字符串。 */
+  type_icon: string
   name: string
   enabled: boolean
   /** 插件未安装或加载失败时为 false，配置保留。 */

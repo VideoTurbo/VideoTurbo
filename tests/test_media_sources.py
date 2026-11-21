@@ -213,7 +213,8 @@ def test_cloud_library_scans_through_plugin_and_gpu_fetches_media(
         sha256 = _install_drive(client)
         plugins = {item["id"]: item for item in client.get("/api/plugins").json()["plugins"]}
         assert plugins["folder-drive"]["has_settings"] and plugins["folder-drive"]["settings_missing"]
-        assert not plugins["emby"]["has_settings"]
+        assert not plugins["webhook"]["has_settings"]
+        assert "emby" not in plugins
         sources = client.get("/api/libraries/sources").json()
         assert [item["id"] for item in sources] == ["folder-drive"]
         assert "目录、令牌" in render(sources[0]["problem"])

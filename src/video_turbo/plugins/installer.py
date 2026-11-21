@@ -783,13 +783,15 @@ def describe(database: Database) -> list[dict[str, Any]]:
 def describe_all(database: Database) -> list[dict[str, Any]]:
     """全部已安装的插件：内置的、Python 包（entry point）提供的，以及在控制台安装的（按地址或本地上传）。
 
-    前两种随主控代码一起安装，不能在控制台更新或卸载。
+    前两种随主控代码一起安装，不能在控制台更新或卸载。不作为插件列出的内置功能（见 ``PluginKind.builtin_listed``）不在其中。
     """
     result = []
     for kind in registry.KINDS.values():
         builtin = {plugin.id for plugin in kind.builtin}
         for plugin in registry.providers(kind.id).values():
             if _owner(kind.id, plugin.id) is not None:
+                continue
+            if plugin.id in builtin and not kind.builtin_listed:
                 continue
             result.append(
                 {

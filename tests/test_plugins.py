@@ -507,13 +507,10 @@ def test_plugin_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         app.state.plugin_transport = _serve({URL: _source()})
         listed = client.get("/api/plugins").json()
         assert listed["safe_mode"] is False
-        # 内置插件也列出来，带图标；不能卸载。
+        # 内置插件也列出来，带图标；不能卸载。Emby、Jellyfin、Plex 是内置功能，不作为插件列出。
         builtin = listed["plugins"]
         assert [(item["id"], item["source"]) for item in builtin] == [
             ("ssh", "builtin"),
-            ("emby", "builtin"),
-            ("jellyfin", "builtin"),
-            ("plex", "builtin"),
             ("webhook", "builtin"),
         ]
         assert all(item["icon"].startswith("data:image/svg+xml;base64,") for item in builtin)

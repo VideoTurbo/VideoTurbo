@@ -36,6 +36,9 @@ class PluginKind:
     min_api_version: int
     entry_point_group: str
     builtin: tuple[type, ...]
+    # 内置的是否作为插件列在“设置 → 插件”中。为 False 时内置的算主程序自带功能，只在各自的页面里选用；
+    # 这一类的第三方插件照常列出。
+    builtin_listed: bool = True
 
     @property
     def api_versions(self) -> range:
@@ -63,6 +66,7 @@ KINDS: dict[str, PluginKind] = {
             media_base.PLUGIN_API_MIN_VERSION,
             "video_turbo.media_servers",
             (EmbyServer, JellyfinServer, PlexServer),
+            builtin_listed=False,
         ),
         PluginKind(
             "media_source",
