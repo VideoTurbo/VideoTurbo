@@ -16,6 +16,7 @@ use shell_core::locale::Lang;
 use shell_core::logfile::Logger;
 use shell_core::worker_env::{self, WorkerEnv};
 use shell_core::worker_manager::{WorkerManager, WorkerPhase};
+use shell_tauri::updater::{self, UpdateMenu};
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
@@ -40,6 +41,8 @@ struct App {
     settings_file: PathBuf,
     pause_item: MenuItem<Wry>,
     autostart_item: CheckMenuItem<Wry>,
+    update_item: MenuItem<Wry>,
+    updates: Arc<UpdateMenu>,
 }
 
 fn app(handle: &AppHandle) -> tauri::State<'_, App> {
@@ -149,6 +152,7 @@ fn build_tray(handle: &AppHandle, state: &App, status_item: &MenuItem<Wry>) -> t
             &open,
             &state.pause_item,
             &state.autostart_item,
+            &state.update_item,
             &logs,
             &PredefinedMenuItem::separator(handle)?,
             &quit,
@@ -179,6 +183,7 @@ fn build_tray(handle: &AppHandle, state: &App, status_item: &MenuItem<Wry>) -> t
                 let _ = app(handle).autostart_item.set_checked(launcher.is_enabled().unwrap_or(false));
             }
             "logs" => open_logs_folder(handle),
+            "update" => app(handle).updates.on_click(handle.clone()),
             "quit" => handle.exit(0),
             _ => {}
         })
@@ -318,7 +323,30 @@ fn setup(tauri_app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         })
     };
     let worker = WorkerManager::new(env, Arc::clone(&logger), notify);
-    let state = App { worker: Arc::clone(&worker), lang, logger, settings_file, pause_item, autostart_item };
+    let update_item = MenuItem::with_id(tauri_app, "update", updater::check_label(lang), true, None::<&str>)?;
+    let updates = {
+        let (worker, log, log2) = (Arc::clone(&worker), Arc::clone(&logger), Arc::clone(&logger));
+        UpdateMenu::new(
+            update_item.clone(),
+            lang,
+            Box::new(move || {
+                log.info("安装更新前停止识别程序");
+                worker.stop();
+            }),
+            Box::new(move |message| log2.info(message)),
+        )
+    };
+    updates.start_background_checks(handle.clone());
+    let state = App {
+        worker: Arc::clone(&worker),
+        lang,
+        logger,
+        settings_file,
+        pause_item,
+        autostart_item,
+        update_item,
+        updates,
+    };
     build_tray(&handle, &state, &status_item)?;
     app_manage(tauri_app, state);
 
@@ -341,6 +369,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|handle, _args, _cwd| show_main(handle)))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])))
         .plugin(tauri_plugin_opener::init())
+        .plugin(updater::plugin())
         .invoke_handler(tauri::generate_handler![state, connect, pause, retry, open_logs, install_tools])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

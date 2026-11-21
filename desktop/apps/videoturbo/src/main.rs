@@ -27,6 +27,7 @@ use server::{Paths, Phase, Server};
 use shell_core::connection::Connection;
 use shell_core::worker_env::WorkerEnv;
 use shell_core::worker_manager::{Connect, WorkerManager, WorkerPhase};
+use shell_tauri::updater::{self, UpdateMenu};
 use texts::Texts;
 
 const AUTOSTART_ARG: &str = "--autostart";
@@ -42,6 +43,8 @@ struct Shell {
     status_item: MenuItem<Wry>,
     worker_item: MenuItem<Wry>,
     autostart_item: CheckMenuItem<Wry>,
+    update_item: MenuItem<Wry>,
+    updates: Arc<UpdateMenu>,
 }
 
 fn shell(app: &AppHandle) -> tauri::State<'_, Shell> {
@@ -145,6 +148,7 @@ fn build_tray(app: &AppHandle, state: &Shell) -> tauri::Result<()> {
             &worker,
             &settings,
             &state.autostart_item,
+            &state.update_item,
             &PredefinedMenuItem::separator(app)?,
             &data,
             &logs,
@@ -171,6 +175,7 @@ fn build_tray(app: &AppHandle, state: &Shell) -> tauri::Result<()> {
             "open" => show_main(app),
             "settings" => show_settings(app),
             "worker" => show_worker(app),
+            "update" => shell(app).updates.on_click(app.clone()),
             "autostart" => toggle_autostart(app),
             "data" => open_folder(app, shell(app).server.paths().home.clone()),
             "logs" => open_folder(app, shell(app).server.paths().logs()),
@@ -432,6 +437,22 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     };
     let worker = WorkerManager::new(worker_env, Arc::clone(&logger), worker_notify);
     let server = Server::new(paths, settings, Arc::clone(&texts), Arc::clone(&logger), notify);
+    let update_item = MenuItem::with_id(app, "update", updater::check_label(texts.lang), true, None::<&str>)?;
+    let updates = {
+        let (server, worker, log) = (Arc::clone(&server), Arc::clone(&worker), Arc::clone(&logger));
+        let log2 = Arc::clone(&logger);
+        UpdateMenu::new(
+            update_item.clone(),
+            texts.lang,
+            Box::new(move || {
+                log.info("安装更新前停止识别程序和主程序");
+                worker.stop();
+                server.shutdown();
+            }),
+            Box::new(move |message| log2.info(message)),
+        )
+    };
+    updates.start_background_checks(handle.clone());
     let state = Shell {
         server: Arc::clone(&server),
         worker,
@@ -440,6 +461,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         status_item,
         worker_item,
         autostart_item,
+        update_item,
+        updates,
     };
     build_tray(&handle, &state)?;
     app.manage(state);
@@ -458,6 +481,7 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(updater::plugin())
         .invoke_handler(tauri::generate_handler![
             server_state,
             restart_server,
