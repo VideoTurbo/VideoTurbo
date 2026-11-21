@@ -7,7 +7,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import { naiveDateLocale, naiveLocale, t } from '@/i18n'
 import { toast } from '@/lib/feedback'
 import { switchTab, tab, type Tab } from '@/stores/navigation'
-import { unread } from '@/stores/notices'
+import { noticesOpen, unread } from '@/stores/notices'
 import { refreshStatus, status } from '@/stores/status'
 import { naiveOverrides, naiveTheme, themeName, toggleTheme } from '@/theme'
 import ComputeView from '@/views/compute/ComputeView.vue'
@@ -23,7 +23,6 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'subtitle', label: t('app.tab.subtitle') }, { id: 'restore', label: t('app.tab.restore') }, { id: 'compute', label: t('app.tab.compute') }, { id: 'translate', label: t('app.tab.translate') },
 ]
 
-const noticesOpen = ref(false)
 const scanOpen = ref(false)
 
 // ---- 顶栏只有一个扫描按钮：平时“扫描影片”，扫描中变成“停止扫描” ----

@@ -1,4 +1,5 @@
 // 提醒（云实例关机等事件）：未读数、新提醒的弹出提示和提示音。
+import type { MessageType } from 'naive-ui'
 import { ref, watch } from 'vue'
 import { api, type NoticeSummary } from '@/api'
 import { toast } from '@/lib/feedback'
@@ -6,6 +7,9 @@ import { status } from './status'
 import { t } from '@/i18n'
 
 export const unread = ref(0)
+/** 提醒抽屉是否打开；点击弹出的新提醒也会打开它。 */
+export const noticesOpen = ref(false)
+const toastTypes: Record<string, MessageType> = { info: 'info', success: 'success', warning: 'warning', error: 'error' }
 /** 已经提示过的最新提醒 ID；null 表示页面刚打开，还没有基准。 */
 let lastId: number | null = null
 let audio: AudioContext | null = null
@@ -45,7 +49,9 @@ async function check(summary: NoticeSummary): Promise<void> {
     const items = (await api.noticesAfter(previous)).items || []
     const last = items[items.length - 1]
     if (!last) return
-    toast.info(t('common.titleMessage', { title: last.title, message: last.message }))
+    // 只弹标题，正文在提醒抽屉里看；一次来了多条时注明还有几条。
+    const extra = items.length > 1 ? t('notices.toastMore', { more: items.length - 1 }) : ''
+    toast.notice(toastTypes[last.level] ?? 'info', last.title, () => { noticesOpen.value = true }, extra)
     if (status.value?.ui?.notice_sound !== false) beep(items.some((item) => item.level === 'error' || item.level === 'success'))
   } catch {
     // 下一轮状态刷新会再试。
