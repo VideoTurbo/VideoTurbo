@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from video_turbo.database import Database
 from video_turbo.i18n import render
 from video_turbo.media_servers.emby import EmbyServer, JellyfinServer
+from video_turbo.media_servers.plex import PlexServer
 from video_turbo.notifiers.base import Notice
 from video_turbo.notifiers.webhook import WebhookNotifier, sign
 from video_turbo.orchestrator.app import app
@@ -185,6 +186,64 @@ async def test_media_server_errors_are_readable_and_redirects_not_followed() -> 
     async with EmbyServer(values, transport=recorder.transport) as server:
         with raises_rendered(PluginCallError, "不是 Emby"):
             await server.test()
+
+
+# ---- Plex ------------------------------------------------------------------
+
+
+async def test_plex_refresh_and_test() -> None:
+    recorder = Recorder(
+        {
+            "GET /library/sections/all/refresh": 200,
+            "GET /": httpx.Response(
+                200, json={"MediaContainer": {"friendlyName": "书房", "version": "1.41.3.9314"}}
+            ),
+        }
+    )
+    values = {"url": "http://plex:32400", "token": "plex-token"}
+    async with PlexServer(values, transport=recorder.transport) as server:
+        await server.refresh()
+        assert render(await server.test()) == "连接成功：书房 1.41.3.9314"
+    assert [str(request.url) for request in recorder.requests] == [
+        "http://plex:32400/library/sections/all/refresh",
+        "http://plex:32400/",
+    ]
+    for request in recorder.requests:
+        assert request.headers["X-Plex-Token"] == "plex-token"
+        assert request.headers["Accept"] == "application/json"
+        # 令牌只放在请求头里，不出现在地址中。
+        assert "plex-token" not in str(request.url)
+
+
+def test_plex_address_validation() -> None:
+    merged = PlexServer.merge_values({}, {"url": " http://plex:32400/ ", "token": "t"})
+    assert merged == {"url": "http://plex:32400", "token": "t"}
+    with raises_rendered(PluginConfigError, "X-Plex-Token"):
+        PlexServer.merge_values({}, {"url": "http://plex:32400"})
+    # 地址变了不能沿用旧令牌。
+    with pytest.raises(PluginConfigError):
+        PlexServer.merge_values(merged, {"url": "http://other:32400"})
+
+
+async def test_plex_errors_are_readable() -> None:
+    values = {"url": "http://plex:32400", "token": "t"}
+    for status, message in {401: "X-Plex-Token", 500: "错误码 500"}.items():
+        recorder = Recorder({"GET /library/sections/all/refresh": status})
+        async with PlexServer(values, transport=recorder.transport) as server:
+            with raises_rendered(PluginCallError, message):
+                await server.refresh()
+    recorder = Recorder(
+        {"GET /library/sections/all/refresh": httpx.Response(302, headers={"location": "http://evil/"})}
+    )
+    async with PlexServer(values, transport=recorder.transport) as server:
+        with raises_rendered(PluginCallError, "跳转"):
+            await server.refresh()
+    assert [request.url.host for request in recorder.requests] == ["plex"]
+    for body in ({"text": "<html>"}, {"json": {"MediaContainer": {}}}):
+        recorder = Recorder({"GET /": httpx.Response(200, **body)})
+        async with PlexServer(values, transport=recorder.transport) as server:
+            with raises_rendered(PluginCallError, "Plex"):
+                await server.test()
 
 
 # ---- Webhook ---------------------------------------------------------------
@@ -363,7 +422,7 @@ def test_connection_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     with TestClient(app) as client:
         app.state.plugin_transport = recorder.transport
         types = client.get("/api/media-servers/types").json()
-        assert [item["id"] for item in types] == ["emby", "jellyfin"]
+        assert [item["id"] for item in types] == ["emby", "jellyfin", "plex"]
         assert types[0]["fields"][0]["binds_secrets"] is True
         assert [item["id"] for item in client.get("/api/notifiers/types").json()] == ["webhook"]
         assert client.get("/api/media-servers").json() == []

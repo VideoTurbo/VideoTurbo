@@ -18,6 +18,7 @@ from ..cloud.providers.manual_ssh import ManualSshProvider
 from ..i18n import msg
 from ..media_servers import base as media_base
 from ..media_servers.emby import EmbyServer, JellyfinServer
+from ..media_servers.plex import PlexServer
 from ..media_sources import base as source_base
 from ..notifiers import base as notifier_base
 from ..notifiers.webhook import WebhookNotifier
@@ -61,7 +62,7 @@ KINDS: dict[str, PluginKind] = {
             media_base.PLUGIN_API_VERSION,
             media_base.PLUGIN_API_MIN_VERSION,
             "video_turbo.media_servers",
-            (EmbyServer, JellyfinServer),
+            (EmbyServer, JellyfinServer, PlexServer),
         ),
         PluginKind(
             "media_source",
