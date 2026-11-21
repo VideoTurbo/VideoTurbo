@@ -540,6 +540,7 @@ MESSAGES: dict[str, str] = {
     "plugins.install.missingKindApi": "PLUGIN_API 中没有声明{label}插件（{id}）的接口版本。",
     "plugins.install.badId": "插件类 {cls} 的 id 只能由小写字母、数字、下划线和短横线组成，最长 64 个字符。",
     "plugins.install.noLabel": "插件类 {cls} 没有设置名称（label）。",
+    "plugins.install.badCondition": "插件类 {cls} 的字段 {field} 的显示条件引用了不存在的字段 {key}。",
     "plugins.install.sourceCredentials": "媒体库来源插件没有多份配置，请把 credential_fields 改为 settings_fields。",
     "plugins.install.sharedSettings": "一个文件里有多个插件类时，插件设置由它们共用，请用模块级 PLUGIN_SETTINGS 声明，不要写在插件类的 settings_fields 里。",
     "plugins.install.settingsType": "PLUGIN_SETTINGS 必须是 CredentialField 组成的元组。",

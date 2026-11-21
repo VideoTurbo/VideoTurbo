@@ -26,6 +26,8 @@ from video_turbo.plugins.base import (
     PluginConfigError,
     masked_values,
     merge_values,
+    missing_required,
+    visible_fields,
 )
 from video_turbo.plugins.connections import Connections
 from video_turbo.plugins.settings import PluginSettings
@@ -114,6 +116,49 @@ def test_field_types_coerce_and_validate() -> None:
         CredentialField("x", "X", type="color")
     with raises_rendered(ValueError, "没有选项"):
         CredentialField("x", "X", type="select")
+
+
+def test_fields_shown_by_condition_are_validated_and_others_cleared() -> None:
+    fields = (
+        CredentialField("url", "地址", secret=False, binds_secrets=True),
+        CredentialField(
+            "auth", "登录方式", type="select", default="token",
+            options=(("token", "令牌"), ("password", "密码"), ("guest", "游客")),
+        ),
+        CredentialField("token", "令牌", visible_when={"auth": ("token",)}),
+        CredentialField("username", "用户名", secret=False, visible_when={"auth": "password"}),
+        CredentialField("password", "密码", visible_when={"auth": ("password",)}),
+        CredentialField("proxy", "代理", type="switch"),
+        CredentialField("proxy_url", "代理地址", secret=False, visible_when={"proxy": True}),
+    )
+    assert fields[2].describe()["visible_when"] == {"auth": ["token"]}
+    assert fields[6].visible_when == {"proxy": ("true",)}
+    assert fields[0].describe()["visible_when"] is None
+    # 没提交登录方式时按默认值“令牌”判断；只要求填写显示的字段。
+    assert [field.key for field in visible_fields(fields, {})] == ["url", "auth", "token", "proxy"]
+    assert missing_required(fields, {"url": "http://a"}) == ["令牌"]
+    with raises_rendered(PluginConfigError, "请填写：令牌"):
+        merge_values(fields, {}, {"url": "http://a"})
+    saved = merge_values(fields, {}, {"url": "http://a", "auth": "token", "token": "t", "username": "u"})
+    # 不显示的字段即使提交了也不保存。
+    assert saved == {"url": "http://a", "auth": "token", "token": "t"}
+    # 换成密码登录：令牌不再显示，清掉已保存的值；用户名和密码变为必填。
+    with raises_rendered(PluginConfigError, "请填写：用户名、密码"):
+        merge_values(fields, saved, {"auth": "password"})
+    switched = merge_values(fields, saved, {"auth": "password", "username": "u", "password": "p"})
+    assert switched == {"url": "http://a", "auth": "password", "username": "u", "password": "p"}
+    # 游客：三项都不显示，也都不保存。
+    assert merge_values(fields, switched, {"auth": "guest"}) == {"url": "http://a", "auth": "guest"}
+    # 地址变化时只要求重新填写显示的密钥。
+    assert merge_values(fields, {**saved, "auth": "guest"}, {"url": "http://b"})["url"] == "http://b"
+    with raises_rendered(PluginConfigError, "令牌"):
+        merge_values(fields, saved, {"url": "http://b"})
+    # 开关条件。
+    assert "proxy_url" not in merge_values(fields, saved, {"proxy_url": "http://p"})
+    assert merge_values(fields, saved, {"proxy": True, "proxy_url": "http://p"})["proxy_url"] == "http://p"
+    for condition in ({"x": ()}, {"x": []}, {"self": ("a",)}, ["auth"]):
+        with raises_rendered(ValueError, "显示条件"):
+            CredentialField("self", "X", visible_when=condition)
 
 
 # ---- Emby / Jellyfin ---------------------------------------------------------

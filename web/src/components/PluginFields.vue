@@ -1,19 +1,22 @@
 <script setup lang="ts">
 // 按插件声明的字段渲染表单：单行文本（密钥为密码框）、多行文本、数字、下拉框、开关。
 // 每份配置（媒体服务器、通知、云平台）和插件设置共用。
+import { computed } from 'vue'
 import { NInput, NInputNumber, NSelect } from 'naive-ui'
 import type { PluginField } from '@/api'
-import type { FieldValues } from '@/lib/pluginFields'
+import { visibleFields, type FieldValues } from '@/lib/pluginFields'
 import FormField from './FormField.vue'
 import SwitchRow from './SwitchRow.vue'
 import { t } from '@/i18n'
 
-defineProps<{
+const props = defineProps<{
   fields: PluginField[]
   /** 已保存过的密钥字段：留空表示不修改。 */
   saved?: Set<string>
 }>()
 const values = defineModel<FieldValues>({ required: true })
+// 按其他字段当前的值显示（例如登录方式选“令牌”时才显示令牌）。
+const shown = computed(() => visibleFields(props.fields, values.value))
 
 function text(key: string): string {
   const value = values.value[key]
@@ -29,7 +32,7 @@ function set(key: string, value: string | number | boolean | null): void {
 </script>
 
 <template>
-  <template v-for="field in fields" :key="field.key">
+  <template v-for="field in shown" :key="field.key">
     <SwitchRow v-if="field.type === 'switch'" :model-value="values[field.key] === true" :label="field.label" :tip="field.help" @update:model-value="set(field.key, $event)" />
     <FormField v-else :label="field.label" :tip="field.help" :required="field.required !== false" :optional="field.required === false && field.type !== 'select'">
       <NInputNumber

@@ -2,6 +2,8 @@
 
 插件的配置（地址、API Key 等）和插件设置在控制台填写，保存在主程序数据库；密钥类字段不回显，留空表示沿用已保存的值。
 地址类字段标记 ``binds_secrets``：地址变化而密钥沿用旧值时拒绝保存，避免已保存的密钥被发往新地址。
+字段可以用 ``visible_when`` 声明只在其他字段取某些值时显示（例如登录方式选“令牌”时才显示令牌）；
+不显示的字段不校验，保存时清掉它的值。
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
+from dataclasses import field as dataclass_field
 from importlib.resources import files
 from typing import Any, ClassVar, Self
 from urllib.parse import unquote, urlsplit
@@ -70,6 +73,11 @@ class CredentialField:
     integer: bool = True
     # 地址类字段：值变化时，必须同时重新填写所有已保存的密钥字段。
     binds_secrets: bool = False
+    # 显示条件：{其他字段的 key: (取值, ...)}，每一项都满足时才显示，例如 {"auth": ("token",)}。
+    # 取值按字符串比较，开关写 "true" / "false"。不显示的字段不校验必填，保存时清掉它的值。
+    visible_when: Mapping[str, tuple[FieldValue, ...]] | None = dataclass_field(
+        default=None, hash=False
+    )
 
     def __post_init__(self) -> None:
         # 文字类属性可以写成 {"zh-Hans": "…", "en": "…"}，按查看者的语言显示（见 i18n.localized）。
@@ -92,11 +100,33 @@ class CredentialField:
             )
         if self.default is None and self.type in {"text", "textarea"}:
             object.__setattr__(self, "default", "")
+        if self.visible_when is not None:
+            conditions: dict[str, tuple[str, ...]] = {}
+            if not isinstance(self.visible_when, Mapping):
+                raise ValueError(f"字段 {self.key} 的显示条件应写成 {{字段: (取值, ...)}}。")
+            for key, allowed in self.visible_when.items():
+                if isinstance(allowed, (str, bool, int, float)):
+                    allowed = (allowed,)
+                if not isinstance(key, str) or key == self.key or not allowed:
+                    raise ValueError(f"字段 {self.key} 的显示条件无效。")
+                conditions[key] = tuple(_condition_text(value) for value in allowed)
+            object.__setattr__(self, "visible_when", conditions or None)
 
     def describe(self) -> dict[str, Any]:
         data = asdict(self)
         data["options"] = [{"value": value, "label": label} for value, label in self.options]
+        data["visible_when"] = (
+            {key: list(allowed) for key, allowed in self.visible_when.items()}
+            if self.visible_when
+            else None
+        )
         return data
+
+    def visible(self, values: Mapping[str, Any]) -> bool:
+        """按其他字段的值（没填的取默认值）判断这个字段是否显示。"""
+        return not self.visible_when or all(
+            _condition_text(values.get(key)) in allowed for key, allowed in self.visible_when.items()
+        )
 
     def coerce(self, value: object) -> FieldValue | None:
         """表单提交的值转成字段的类型；None 表示清空。不合法时抛出 PluginConfigError。"""
@@ -142,12 +172,39 @@ def _filled(value: object) -> bool:
     return value is not None and value != ""
 
 
+def _condition_text(value: object) -> str:
+    """显示条件比较用的文字：开关是 "true" / "false"，没有值是空字符串。"""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "" if value is None else str(value)
+
+
+def visible_fields(
+    fields: tuple[CredentialField, ...], values: Mapping[str, Any]
+) -> tuple[CredentialField, ...]:
+    """按当前的值（没填的取默认值）显示的字段。"""
+    effective = with_defaults(fields, dict(values))
+    return tuple(field for field in fields if field.visible(effective))
+
+
+def check_conditions(fields: tuple[CredentialField, ...]) -> list[tuple[str, str]]:
+    """显示条件引用了不存在的字段：[(字段 key, 引用的 key), ...]。"""
+    keys = {field.key for field in fields}
+    return [
+        (field.key, key)
+        for field in fields
+        for key in (field.visible_when or {})
+        if key not in keys
+    ]
+
+
 def merge_values(
     fields: tuple[CredentialField, ...], saved: dict[str, Any], values: dict[str, Any]
 ) -> dict[str, Any]:
     """表单提交的值叠加到已保存的值上。
 
     没有提交的字段沿用已保存的值；密钥字段提交空值也表示沿用；其他字段提交空值表示清空。
+    按合并后的值不显示的字段（见 ``visible_when``）不校验，并清掉它的值。
     缺少必填项、值不合法，或地址变化后沿用旧密钥时抛出 PluginConfigError。
     """
     merged = dict(saved)
@@ -161,6 +218,10 @@ def merge_values(
             submitted[field.key] = value
         elif not field.secret:
             cleared.add(field.key)
+    candidate = {key: value for key, value in {**saved, **submitted}.items() if key not in cleared}
+    shown = visible_fields(fields, candidate)
+    hidden = {field.key for field in fields} - {field.key for field in shown}
+    fields = shown
     rebound = [
         field.label
         for field in fields
@@ -176,11 +237,13 @@ def merge_values(
     ]
     if rebound and kept:
         raise PluginConfigError(msg("plugins.field.rebound", changed=rebound, fields=kept))
-    for key in cleared:
+    for key in cleared | hidden:
         merged.pop(key, None)
-    merged.update(submitted)
+    merged.update({key: value for key, value in submitted.items() if key not in hidden})
+    # 没填、但插件声明了默认值的项按默认值算（例如下拉框）。
+    effective = with_defaults(fields, merged)
     missing = [
-        field.label for field in fields if field.required and not _filled(merged.get(field.key))
+        field.label for field in fields if field.required and not _filled(effective.get(field.key))
     ]
     if missing:
         raise PluginConfigError(msg("plugins.field.required", fields=missing))
@@ -213,9 +276,12 @@ def with_defaults(fields: tuple[CredentialField, ...], values: dict[str, Any]) -
 
 
 def missing_required(fields: tuple[CredentialField, ...], values: dict[str, Any]) -> list[str]:
-    """还没填写的必填项名称。"""
+    """还没填写的必填项名称（不显示的字段不算；没保存过、有默认值的项按默认值算）。"""
+    effective = with_defaults(fields, values)
     return [
-        field.label for field in fields if field.required and not _filled(values.get(field.key))
+        field.label
+        for field in visible_fields(fields, effective)
+        if field.required and not _filled(effective.get(field.key))
     ]
 
 

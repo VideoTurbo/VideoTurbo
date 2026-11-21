@@ -59,6 +59,7 @@ from .base import (
     ICON_MAX_BYTES,
     CredentialField,
     PluginInfo,
+    check_conditions,
     icon_from_bytes,
     icon_uri,
     localize_plugin,
@@ -521,6 +522,15 @@ def _check_member(module: types.ModuleType, kind: registry.PluginKind, plugin: t
         )
 
 
+def _check_conditions(plugin: type) -> None:
+    """字段的显示条件只能引用同一组字段（每份配置或插件设置）里的其他字段。"""
+    for fields in (getattr(plugin, "credential_fields", ()), getattr(plugin, "settings_fields", ())):
+        for field_key, missing in check_conditions(tuple(fields)):
+            raise PluginError(
+                msg("plugins.install.badCondition", cls=plugin.__name__, field=field_key, key=missing)
+            )
+
+
 def _apply_settings(
     module: types.ModuleType, members: list[tuple[registry.PluginKind, type]]
 ) -> None:
@@ -572,6 +582,8 @@ def _plugin_of(module: types.ModuleType) -> _Plugin:
         seen.add((kind.id, plugin.id))
         members.append((kind, plugin))
     _apply_settings(module, members)
+    for _, plugin in members:
+        _check_conditions(plugin)
     for _, plugin in members:
         localize_plugin(plugin)
         try:

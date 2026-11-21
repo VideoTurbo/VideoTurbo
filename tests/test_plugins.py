@@ -270,6 +270,13 @@ async def test_safe_mode_skips_installed_plugins(db: Database, monkeypatch: pyte
             ),
             "settings_fields",
         ),
+        (
+            _source(api=3).replace(
+                'credential_fields = (CredentialField("api_key", "API Key"),)',
+                'credential_fields = (CredentialField("api_key", "API Key", visible_when={"mode": "a"}),)',
+            ),
+            "显示条件引用了不存在的字段 mode",
+        ),
         ("x" * (installer.MAX_SOURCE_BYTES + 1), "超过 1 MB"),
     ],
 )

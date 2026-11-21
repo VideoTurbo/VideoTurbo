@@ -20,7 +20,8 @@ from ..plugins.base import ConfigurablePlugin
 # - 只新增（新的可选方法、字段）：PLUGIN_API_VERSION 加一，MIN 不变，旧插件照常加载；
 # - 删改已有接口：PLUGIN_API_VERSION 加一，MIN 改成与它相同，旧插件需要作者更新。
 # 历史：+1 支持 label、description 和字段文字写成 {语言: 文字}（多语言）。
-PLUGIN_API_VERSION = 2
+#       +1 字段支持 visible_when（按其他字段的值显示）。
+PLUGIN_API_VERSION = 3
 PLUGIN_API_MIN_VERSION = 1
 
 NoticeLevel = Literal["info", "success", "warning", "error"]
