@@ -315,6 +315,18 @@ fn model_choices(handle: AppHandle, code: Option<String>) -> shell_core::models:
     })
 }
 
+/// 改用模型的另一个已下载的版本。
+#[tauri::command]
+fn model_select(handle: AppHandle, id: String, value: String) {
+    let state = app(&handle);
+    if load_settings(&state.settings_file).paused {
+        let _ = state.worker.env().select_model(&id, &value);
+        state.worker.refresh_models_later();
+    } else {
+        state.worker.select_model(None, id, value);
+    }
+}
+
 #[tauri::command]
 fn models_refresh(handle: AppHandle) {
     app(&handle).worker.refresh_models_later();
@@ -496,6 +508,7 @@ fn main() {
             model_delete,
             models_refresh,
             model_choices,
+            model_select,
             open_logs,
             install_tools
         ])

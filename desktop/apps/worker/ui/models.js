@@ -5,7 +5,7 @@
   const T = zh ? {
     title: '识别模型', mode: '当前识别模式：', unknown: '未知（连不上主程序）', cached: '（上次读到的）',
     whisperjav2: 'WhisperJAV 双遍', whisperjav1: 'WhisperJAV 单遍', faster: 'faster-whisper',
-    needed: '当前模式需要', downloaded: '已下载', remove: '删除', confirm: '确认删除',
+    needed: '当前模式需要', downloaded: '已下载', remove: '删除', confirm: '确认删除', use: '改用',
     download: '下载所选', none: '没有要下载的模型', busy: '正在下载或自检，完成后再操作',
     missing: '当前识别模式需要的模型还没下载：{names}。下载之前，这台电脑不接这个模式的任务。',
     pickTitle: '要下载的模型', picked: '所选模型共 {size}', pickNone: '没有选模型：之后可以在“本机识别”窗口或 Worker 应用的模型清单里下载。',
@@ -13,7 +13,7 @@
   } : {
     title: 'Recognition models', mode: 'Current recognition mode: ', unknown: "unknown (can't reach the main app)", cached: ' (last known)',
     whisperjav2: 'WhisperJAV two-pass', whisperjav1: 'WhisperJAV single-pass', faster: 'faster-whisper',
-    needed: 'Needed now', downloaded: 'Downloaded', remove: 'Delete', confirm: 'Confirm delete',
+    needed: 'Needed now', downloaded: 'Downloaded', remove: 'Delete', confirm: 'Confirm delete', use: 'Use',
     download: 'Download selected', none: 'Nothing selected', busy: 'Downloading or testing; try again when it finishes',
     missing: "Models the current recognition mode needs aren't downloaded: {names}. This computer won't take jobs in this mode until they are.",
     pickTitle: 'Models to download', picked: 'Selected models: {size}', pickNone: 'No models selected; download them later from the model list.',
@@ -32,7 +32,8 @@
   }
 
   /**
-   * root：放清单的元素。actions.download(ids) / actions.remove(id) 调用外壳命令。
+   * root：放清单的元素。actions.download(ids) / actions.remove(id) / actions.select(id, value) 调用外壳命令；
+   * ids 里有版本可选的模型写成 模型@版本（例如 qwen3-asr@Qwen/Qwen3-ASR-0.6B）。
    * options.picker：下载前选模型（开启、连接时），不显示下载和删除按钮，用 update.selection() 取选中的模型。
    * 返回 update(catalog, busy)：catalog 是外壳给的模型清单，busy 为 true 时（安装、下载、自检中）按钮不可用。
    */
@@ -47,13 +48,35 @@
     const button = root.querySelector('.models-download')
     const note = root.querySelector('.models-note')
     const picked = new Map()  // 用户改过的勾选，刷新后保留
+    const variantPick = new Map()  // 用户在下拉框里选的版本
     let confirming = null
     let current = null
     let working = false
 
+    /** 每个模型这次要用的版本：用户在下拉框里选的，没选过就是当前版本。 */
+    function chosen(model) {
+      const value = variantPick.get(model.id) ?? model.variant
+      const variant = (model.variants || []).find((item) => item.value === value) || null
+      return {
+        value,
+        variant,
+        downloaded: variant ? variant.downloaded : model.downloaded,
+        size: variant ? variant.size_mb : model.size_mb,
+        // 选了另一个已下载的版本：点“改用”切换，不用下载。
+        switchable: !!variant && value !== model.variant && variant.downloaded,
+      }
+    }
+
+    function isPicked(model) {
+      const pick = chosen(model)
+      if (pick.downloaded) return false
+      if (picked.has(model.id)) return picked.get(model.id)
+      return model.needed || pick.value !== model.variant
+    }
+
     function selection() {
       if (!current) return []
-      return current.models.filter((m) => !m.downloaded && (picked.has(m.id) ? picked.get(m.id) : m.needed)).map((m) => m.id)
+      return current.models.filter(isPicked).map((m) => (m.variants && m.variants.length ? `${m.id}@${chosen(m).value}` : m.id))
     }
 
     function render() {
@@ -66,19 +89,30 @@
       warn.textContent = T.missing.replace('{names}', missing.map((m) => `${zh ? m.zh : m.en}（${size(m.size_mb)}）`).join(zh ? '、' : ', '))
       rows.innerHTML = ''
       for (const model of catalog.models) {
-        const row = document.createElement('label')
+        const pick = chosen(model)
+        const row = document.createElement('div')
         row.className = 'model-row'
-        const checked = picked.has(model.id) ? picked.get(model.id) : model.needed
+        const options = (model.variants || []).map((item) => `<option value="${item.value.replace(/"/g, '&quot;')}" ${item.value === pick.value ? 'selected' : ''}></option>`).join('')
         row.innerHTML = `
-          <input type="checkbox" ${model.downloaded ? 'disabled checked' : checked ? 'checked' : ''} ${working ? 'disabled' : ''}>
+          <input type="checkbox" ${pick.downloaded ? 'disabled checked' : isPicked(model) ? 'checked' : ''} ${working ? 'disabled' : ''}>
           <span class="model-text"><b></b><small></small></span>
+          ${options ? `<select class="model-variant" ${working ? 'disabled' : ''}>${options}</select>` : ''}
           ${model.needed ? `<span class="tag">${T.needed}</span>` : ''}
-          <span class="model-size">${size(model.size_mb)}</span>
-          ${model.downloaded ? `<span class="model-done">${T.downloaded}</span>${picker ? '' : `<button class="model-remove" ${working ? 'disabled' : ''}>${confirming === model.id ? T.confirm : T.remove}</button>`}` : ''}`
+          <span class="model-size">${size(pick.size)}</span>
+          ${pick.switchable && !picker ? `<button class="model-use" ${working ? 'disabled' : ''}>${T.use}</button>` : ''}
+          ${pick.downloaded && !pick.switchable ? `<span class="model-done">${T.downloaded}</span>${picker ? '' : `<button class="model-remove" ${working ? 'disabled' : ''}>${confirming === model.id ? T.confirm : T.remove}</button>`}` : ''}`
         row.querySelector('b').textContent = zh ? model.zh : model.en
         row.querySelector('small').textContent = zh ? model.purpose_zh : model.purpose_en
+        row.querySelectorAll('option').forEach((option, index) => {
+          const item = model.variants[index]
+          option.textContent = `${item.label} · ${size(item.size_mb)}${item.downloaded ? ` · ${T.downloaded}` : ''}`
+        })
         const box = row.querySelector('input')
         box.onchange = () => { picked.set(model.id, box.checked); render() }
+        const select = row.querySelector('.model-variant')
+        if (select) select.onchange = () => { variantPick.set(model.id, select.value); picked.delete(model.id); render() }
+        const use = row.querySelector('.model-use')
+        if (use) use.onclick = () => { variantPick.delete(model.id); actions.select(model.id, pick.value) }
         const remove = row.querySelector('.model-remove')
         if (remove) {
           remove.onclick = (event) => {
@@ -95,8 +129,8 @@
         }
         rows.appendChild(row)
       }
-      const ids = selection()
-      const total = catalog.models.filter((m) => ids.includes(m.id)).reduce((sum, m) => sum + (m.size_mb || 0), 0)
+      const ids = selection().map((id) => id.split('@')[0])
+      const total = catalog.models.filter((m) => ids.includes(m.id)).reduce((sum, m) => sum + (chosen(m).size || 0), 0)
       if (picker) {
         button.hidden = true
         note.textContent = ids.length ? T.picked.replace('{size}', size(total)) : T.pickNone

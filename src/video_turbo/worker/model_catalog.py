@@ -6,6 +6,9 @@
   FireRedVAD 只有几 MB，随 Qwen3-ASR 一起下载。
 - faster-whisper：Whisper large-v3（约 2.9 GB）。
 
+Qwen3-ASR 和 Whisper 有小版本可选（Qwen3-ASR 0.6B；Whisper large-v3-turbo、medium、small），
+在每台电脑的模型清单里选，选择写进这台电脑的 worker.yaml（whisperjav.model / asr.model）。
+
 桌面版默认只下载当前识别模式（从主程序读取）需要的模型，其余的由用户在清单里自己下载。
 模型放在 Hugging Face 缓存目录里，布局与识别时一致（WhisperJAV 用 ``<模型目录>/huggingface``，
 faster-whisper 直接用 ``<模型目录>``），所以下载好之后识别时不再联网。
@@ -14,7 +17,11 @@ faster-whisper 直接用 ``<模型目录>``），所以下载好之后识别时�
 
     python -m video_turbo.worker.model_catalog --config <worker.yaml> status
     python -m video_turbo.worker.model_catalog --config <worker.yaml> download qwen3-asr anime-whisper
+    python -m video_turbo.worker.model_catalog --config <worker.yaml> download faster-whisper@large-v3-turbo
+    python -m video_turbo.worker.model_catalog --config <worker.yaml> select qwen3-asr Qwen/Qwen3-ASR-0.6B
     python -m video_turbo.worker.model_catalog --config <worker.yaml> delete anime-whisper
+
+``download`` 的 ``模型@版本`` 先改用这个版本再下载。
 
 ``status`` 输出一行 JSON；``download`` 以 ``@@VT `` 开头的 JSON 行输出进度。
 """
@@ -24,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import shutil
 import sys
 import threading
@@ -46,9 +54,13 @@ FASTER_WHISPER_FILES = ("config.json", "preprocessor_config.json", "model.bin", 
 # 默认模型的大小（MB），连不上 Hugging Face 时用来显示；能连上时以实际文件大小为准。
 KNOWN_SIZES_MB = {
     "Qwen/Qwen3-ASR-1.7B": 4485,
+    "Qwen/Qwen3-ASR-0.6B": 1793,
     ANIME_REPO: 2887,
     FIRERED_VAD_REPO: 7,
     "Systran/faster-whisper-large-v3": 2948,
+    "mobiuslabsgmbh/faster-whisper-large-v3-turbo": 1547,
+    "Systran/faster-whisper-medium": 1460,
+    "Systran/faster-whisper-small": 464,
 }
 # 主程序的识别模式缓存在配置旁边：连不上主程序时用上次的结果。
 MODE_FILE = "asr-mode.json"
@@ -67,6 +79,28 @@ class Repo:
 
 
 @dataclass(frozen=True)
+class Variant:
+    """模型的一个版本：value 是写进 worker.yaml 的值。"""
+
+    value: str
+    label: str
+
+
+# 第一个是默认版本。
+VARIANTS = {
+    QWEN: (Variant("Qwen/Qwen3-ASR-1.7B", "1.7B"), Variant("Qwen/Qwen3-ASR-0.6B", "0.6B")),
+    FASTER_WHISPER: (
+        Variant("large-v3", "large-v3"),
+        Variant("large-v3-turbo", "large-v3-turbo"),
+        Variant("medium", "medium"),
+        Variant("small", "small"),
+    ),
+}
+# 版本写在 worker.yaml 的哪一节、哪个键。
+SETTINGS = {QWEN: ("whisperjav", "model"), FASTER_WHISPER: ("asr", "model")}
+
+
+@dataclass(frozen=True)
 class Model:
     id: str
     zh: str
@@ -75,10 +109,12 @@ class Model:
     purpose_en: str
     repos: tuple[Repo, ...]
     modes: tuple[str, ...] = field(default=())
+    # 当前用的版本（worker.yaml 里的值）和可选的版本；没有版本可选时为空。
+    variant: str | None = None
+    variants: tuple[Variant, ...] = ()
 
     def size_mb(self) -> int | None:
-        sizes = [KNOWN_SIZES_MB.get(repo.repo_id) for repo in self.repos]
-        return None if any(size is None for size in sizes) else sum(size or 0 for size in sizes)
+        return _size_mb(self.repos)
 
 
 def _faster_whisper_repo(name: str) -> str:
@@ -91,21 +127,43 @@ def _faster_whisper_repo(name: str) -> str:
     return _MODELS.get(name, f"Systran/faster-whisper-{name}")
 
 
-def catalog(config: WorkerConfig) -> list[Model]:
+def repos(config: WorkerConfig, model_id: str, value: str | None = None) -> tuple[Repo, ...]:
+    """模型（某个版本，默认当前版本）要下载的仓库。"""
     hub = config.asr.download_root / "huggingface"
-    qwen = [Repo(config.whisperjav.model, hub)]
-    if config.whisperjav.speech_segmenter == "firered-vad":
-        qwen.append(Repo(FIRERED_VAD_REPO, hub))
+    if model_id == QWEN:
+        found = [Repo(value or config.whisperjav.model, hub)]
+        if config.whisperjav.speech_segmenter == "firered-vad":
+            found.append(Repo(FIRERED_VAD_REPO, hub))
+        return tuple(found)
+    if model_id == ANIME:
+        return (Repo(ANIME_REPO, hub),)
+    if model_id == FASTER_WHISPER:
+        name = value or config.asr.model
+        return (Repo(_faster_whisper_repo(name), config.asr.download_root, FASTER_WHISPER_FILES),)
+    return ()
+
+
+def _variants(model_id: str, current: str) -> tuple[Variant, ...]:
+    known = VARIANTS.get(model_id, ())
+    # worker.yaml 里手动写的其他模型也列出来。
+    return known if any(item.value == current for item in known) else (*known, Variant(current, current))
+
+
+def catalog(config: WorkerConfig) -> list[Model]:
+    qwen, whisper = config.whisperjav.model, config.asr.model
     return [
         Model(QWEN, "Qwen3-ASR", "Qwen3-ASR", "WhisperJAV 模式（第一遍）", "WhisperJAV mode (pass 1)",
-              tuple(qwen), ("whisperjav",)),
+              repos(config, QWEN), ("whisperjav",), qwen, _variants(QWEN, qwen)),
         Model(ANIME, "anime-whisper", "anime-whisper", "WhisperJAV 双遍（第二遍）", "WhisperJAV two-pass (pass 2)",
-              (Repo(ANIME_REPO, hub),), ("whisperjav_ensemble",)),
-        Model(FASTER_WHISPER, f"Whisper {config.asr.model}", f"Whisper {config.asr.model}",
-              "faster-whisper 模式", "faster-whisper mode",
-              (Repo(_faster_whisper_repo(config.asr.model), config.asr.download_root, FASTER_WHISPER_FILES),),
-              ("faster_whisper",)),
+              repos(config, ANIME), ("whisperjav_ensemble",)),
+        Model(FASTER_WHISPER, "Whisper", "Whisper", "faster-whisper 模式", "faster-whisper mode",
+              repos(config, FASTER_WHISPER), ("faster_whisper",), whisper, _variants(FASTER_WHISPER, whisper)),
     ]
+
+
+def _size_mb(found: Iterable[Repo]) -> int | None:
+    sizes = [KNOWN_SIZES_MB.get(repo.repo_id) for repo in found]
+    return None if any(size is None for size in sizes) else sum(size or 0 for size in sizes)
 
 
 def repo_downloaded(repo: Repo) -> bool:
@@ -190,6 +248,16 @@ def status(config: WorkerConfig, config_file: Path) -> dict:
             "size_mb": model.size_mb(),
             "downloaded": downloaded(model),
             "needed": model.id in wanted,
+            "variant": model.variant,
+            "variants": [
+                {
+                    "value": item.value,
+                    "label": item.label,
+                    "size_mb": _size_mb(repos(config, model.id, item.value)),
+                    "downloaded": all(repo_downloaded(repo) for repo in repos(config, model.id, item.value)),
+                }
+                for item in model.variants
+            ],
         })
     from .gpu import cuda_runtime_ready, torch_lib_dir
 
@@ -282,6 +350,30 @@ def download(
     emit("done")
 
 
+def select(config_file: Path, model_id: str, value: str) -> None:
+    """改用模型的另一个版本：写进 worker.yaml（保留注释和其他设置）。"""
+    if model_id not in SETTINGS:
+        raise SystemExit(f"这个模型没有版本可选：{model_id}")
+    section, key = SETTINGS[model_id]
+    text = config_file.read_text(encoding="utf-8")
+    line = f"  {key}: {json.dumps(value, ensure_ascii=False)}"
+    header = re.search(rf"^{section}:[ \t]*$", text, re.MULTILINE)
+    if header is None:
+        text = text.rstrip("\n") + f"\n{section}:\n{line}\n"
+    else:
+        # 这一节到下一个顶层键为止。
+        end = re.search(r"^\S", text[header.end() + 1:], re.MULTILINE)
+        stop = header.end() + 1 + end.start() if end else len(text)
+        body = text[header.end():stop]
+        pattern = re.compile(rf"^  {key}:.*$", re.MULTILINE)
+        body = pattern.sub(lambda _: line, body, count=1) if pattern.search(body) else f"\n{line}{body}"
+        text = text[:header.end()] + body + text[stop:]
+    temporary = config_file.with_suffix(".yaml.tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(config_file)
+    emit("selected", id=model_id, value=value)
+
+
 def delete(config: WorkerConfig, model_id: str) -> None:
     for model in catalog(config):
         if model.id != model_id:
@@ -300,17 +392,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, required=True)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status", help="以 JSON 输出模型清单和当前识别模式")
-    fetch = commands.add_parser("download", help="下载模型")
+    fetch = commands.add_parser("download", help="下载模型；模型@版本 先改用这个版本")
     fetch.add_argument("ids", nargs="+")
+    choose = commands.add_parser("select", help="改用模型的另一个版本")
+    choose.add_argument("id")
+    choose.add_argument("value")
     remove = commands.add_parser("delete", help="删除模型")
     remove.add_argument("id")
     args = parser.parse_args(argv)
     config = load_worker_config(args.config, require_token=False)
     if args.command == "status":
         print(json.dumps(status(config, args.config), ensure_ascii=False), flush=True)
+    elif args.command == "select":
+        select(args.config, args.id, args.value)
     elif args.command == "download":
         try:
-            download(config, args.ids)
+            ids = []
+            for item in args.ids:
+                model_id, _, value = item.partition("@")
+                if value:
+                    select(args.config, model_id, value)
+                ids.append(model_id)
+            config = load_worker_config(args.config, require_token=False)
+            download(config, ids)
         except Exception as exc:  # noqa: BLE001 - 原因交给外壳显示
             emit("error", message=f"{type(exc).__name__}: {exc}")
             return 1

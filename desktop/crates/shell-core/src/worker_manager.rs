@@ -180,9 +180,9 @@ impl WorkerManager {
         self.lock().generation == generation
     }
 
-    /// 运行环境装好、至少有一个模型下载并自检过，开启后不用再下载任何东西。
+    /// 运行环境装好、至少下载了一个模型，开启后不用再下载任何东西（自检不下载）。
     pub fn ready_to_run(&self) -> bool {
-        !self.env.needs_install() && self.models().is_some_and(|catalog| self.self_test_covers(&catalog))
+        !self.env.needs_install() && self.has_models()
     }
 
     fn self_test_marker(&self) -> PathBuf {
@@ -253,6 +253,16 @@ impl WorkerManager {
         self.models().unwrap_or_else(|| models::default_catalog(mode()))
     }
 
+    /// 改用模型的另一个已下载的版本：写配置后重新启动（新版本没自检过时先自检，不下载）。
+    pub fn select_model(self: &Arc<Self>, connect: Option<Connect>, id: String, value: String) {
+        if let Err(error) = self.env.select_model(&id, &value) {
+            self.logger.info(&error.message());
+        }
+        self.logger.info(&format!("模型 {id} 改用 {value}"));
+        self.refresh_models();
+        self.start(connect, false);
+    }
+
     /// 删除模型：停下识别程序（Windows 上正在用的文件删不掉），删除后不下载任何东西，重新启动。
     pub fn delete_model(self: &Arc<Self>, connect: Option<Connect>, id: String) {
         let (generation, previous) = {
@@ -306,7 +316,8 @@ impl WorkerManager {
         requested: Option<Vec<String>>,
     ) {
         let installed = !self.env.needs_install();
-        let ready = installed && self.refresh_models().is_some_and(|catalog| self.self_test_covers(&catalog));
+        let ready =
+            installed && self.refresh_models().is_some_and(|catalog| !catalog.downloaded().is_empty());
         if !allow_download && !ready {
             self.set(generation, WorkerPhase::Pending);
             return;
@@ -348,7 +359,8 @@ impl WorkerManager {
             None => Vec::new(),
         }
         .into_iter()
-        .filter(|id| catalog.find(id).is_some_and(|model| !model.downloaded))
+        // 带版本的（模型@版本）交给清单：换版本，没下载过再下载。
+        .filter(|id| id.contains('@') || catalog.find(id).is_some_and(|model| !model.downloaded))
         .collect();
         if !wanted.is_empty() {
             if !self.fetch_models(generation, &cancel, &wanted, &catalog) {
@@ -381,7 +393,10 @@ impl WorkerManager {
 
     /// 下载模型；faster-whisper 在 Windows 上找不到显卡运行库时先单独安装。
     fn fetch_models(&self, generation: u64, cancel: &Cancel, ids: &[String], catalog: &ModelStatus) -> bool {
-        if cfg!(windows) && !catalog.runtime_ready && ids.iter().any(|id| id == "faster-whisper") {
+        if cfg!(windows)
+            && !catalog.runtime_ready
+            && ids.iter().any(|id| id == "faster-whisper" || id.starts_with("faster-whisper@"))
+        {
             self.logger.info("找不到 faster-whisper 要的显卡运行库，单独安装");
             let mut current = (0, 0, String::new(), String::new());
             let result = self.env.install_runtime(cancel, |event| {

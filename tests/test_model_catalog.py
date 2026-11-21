@@ -176,9 +176,70 @@ def test_shell_defaults_match_the_catalog(tmp_path: Path) -> None:
     project = Path(__file__).resolve().parents[1]
     defaults = json.loads((project / "desktop" / "crates" / "shell-core" / "src" / "default_models.json").read_text(
         encoding="utf-8"))
+    config = WorkerConfig()
     catalog = [
         {"id": m.id, "zh": m.zh, "en": m.en, "purpose_zh": m.purpose_zh, "purpose_en": m.purpose_en,
-         "size_mb": m.size_mb()}
-        for m in model_catalog.catalog(WorkerConfig())
+         "size_mb": m.size_mb(), "variant": m.variant,
+         "variants": [{"value": v.value, "label": v.label,
+                       "size_mb": model_catalog._size_mb(model_catalog.repos(config, m.id, v.value))}
+                      for v in m.variants]}
+        for m in model_catalog.catalog(config)
     ]
     assert defaults == catalog
+
+
+def test_smaller_variants_are_listed_and_can_be_selected(tmp_path: Path) -> None:
+    config_file = tmp_path / "config" / "worker.yaml"
+    config_file.parent.mkdir()
+    project = Path(__file__).resolve().parents[1]
+    config_file.write_text((project / "config" / "worker.example.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    from video_turbo.worker.config import load_worker_config
+
+    config = load_worker_config(config_file, require_token=False)
+    result = model_catalog.status(config, config_file)
+    qwen, anime, whisper = result["models"]
+    assert qwen["variant"] == "Qwen/Qwen3-ASR-1.7B" and anime["variants"] == []
+    assert [(v["label"], v["size_mb"]) for v in qwen["variants"]] == [("1.7B", 4492), ("0.6B", 1800)]
+    assert [v["label"] for v in whisper["variants"]] == ["large-v3", "large-v3-turbo", "medium", "small"]
+    assert whisper["variants"][1]["size_mb"] == 1547
+
+    # 改用小版本：写进 worker.yaml，其他设置和注释保留。
+    before = config_file.read_text(encoding="utf-8")
+    model_catalog.select(config_file, "qwen3-asr", "Qwen/Qwen3-ASR-0.6B")
+    model_catalog.select(config_file, "faster-whisper", "large-v3-turbo")
+    after = config_file.read_text(encoding="utf-8")
+    assert after.count("\n") == before.count("\n") and "# " in after
+    config = load_worker_config(config_file, require_token=False)
+    assert (config.whisperjav.model, config.asr.model) == ("Qwen/Qwen3-ASR-0.6B", "large-v3-turbo")
+    assert config.asr.compute_type == WorkerConfig().asr.compute_type
+    repos = {model.id: model.repos for model in model_catalog.catalog(config)}
+    assert repos["qwen3-asr"][0].repo_id == "Qwen/Qwen3-ASR-0.6B"
+    assert repos["faster-whisper"][0].repo_id == "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
+
+    # 只有下载了当前选的版本才算支持这个模式。
+    for repo in repos["qwen3-asr"]:
+        _cache(repo)
+    assert model_catalog.supported_modes(config) == ({"whisperjav"}, False)
+    model_catalog.select(config_file, "qwen3-asr", "Qwen/Qwen3-ASR-1.7B")
+    config = load_worker_config(config_file, require_token=False)
+    assert model_catalog.supported_modes(config) == (set(), False)
+    status = model_catalog.status(config, config_file)
+    assert [v["downloaded"] for v in status["models"][0]["variants"]] == [False, True]
+
+    # 手动写在 worker.yaml 里的其他模型也列出来。
+    model_catalog.select(config_file, "faster-whisper", "Systran/faster-whisper-tiny")
+    config = load_worker_config(config_file, require_token=False)
+    labels = [v.label for v in next(m for m in model_catalog.catalog(config) if m.id == "faster-whisper").variants]
+    assert labels[-1] == "Systran/faster-whisper-tiny"
+
+
+def test_download_can_switch_variant_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "config" / "worker.yaml"
+    config_file.parent.mkdir()
+    config_file.write_text("asr:\n  model: large-v3\n", encoding="utf-8")
+    fetched = []
+    monkeypatch.setattr(model_catalog, "_fetch", lambda repo: fetched.append(repo.repo_id))
+    monkeypatch.setattr(model_catalog, "download", lambda config, ids: fetched.append((config.asr.model, ids)))
+    assert model_catalog.main(["--config", str(config_file), "download", "faster-whisper@small"]) == 0
+    assert fetched == [("small", ["faster-whisper"])]
+    assert "model: \"small\"" in config_file.read_text(encoding="utf-8")

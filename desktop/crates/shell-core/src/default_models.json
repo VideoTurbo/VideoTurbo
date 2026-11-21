@@ -1,8 +1,14 @@
 [
   {"id": "qwen3-asr", "zh": "Qwen3-ASR", "en": "Qwen3-ASR", "purpose_zh": "WhisperJAV 模式（第一遍）",
-   "purpose_en": "WhisperJAV mode (pass 1)", "size_mb": 4492},
+   "purpose_en": "WhisperJAV mode (pass 1)", "size_mb": 4492, "variant": "Qwen/Qwen3-ASR-1.7B",
+   "variants": [{"value": "Qwen/Qwen3-ASR-1.7B", "label": "1.7B", "size_mb": 4492},
+                {"value": "Qwen/Qwen3-ASR-0.6B", "label": "0.6B", "size_mb": 1800}]},
   {"id": "anime-whisper", "zh": "anime-whisper", "en": "anime-whisper", "purpose_zh": "WhisperJAV 双遍（第二遍）",
-   "purpose_en": "WhisperJAV two-pass (pass 2)", "size_mb": 2887},
-  {"id": "faster-whisper", "zh": "Whisper large-v3", "en": "Whisper large-v3", "purpose_zh": "faster-whisper 模式",
-   "purpose_en": "faster-whisper mode", "size_mb": 2948}
+   "purpose_en": "WhisperJAV two-pass (pass 2)", "size_mb": 2887, "variant": null, "variants": []},
+  {"id": "faster-whisper", "zh": "Whisper", "en": "Whisper", "purpose_zh": "faster-whisper 模式",
+   "purpose_en": "faster-whisper mode", "size_mb": 2948, "variant": "large-v3",
+   "variants": [{"value": "large-v3", "label": "large-v3", "size_mb": 2948},
+                {"value": "large-v3-turbo", "label": "large-v3-turbo", "size_mb": 1547},
+                {"value": "medium", "label": "medium", "size_mb": 1460},
+                {"value": "small", "label": "small", "size_mb": 464}]}
 ]

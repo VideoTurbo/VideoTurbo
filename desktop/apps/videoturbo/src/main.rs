@@ -409,6 +409,21 @@ fn worker_model_delete(app: AppHandle, id: String) {
     }
 }
 
+/// 改用模型的另一个已下载的版本。
+#[tauri::command]
+fn worker_model_select(app: AppHandle, id: String, value: String) {
+    let state = shell(&app);
+    let connect = state.server.settings().local_worker.then(|| local_connection(Arc::clone(&state.server)));
+    match connect {
+        Some(connect) => state.worker.select_model(Some(connect), id, value),
+        // 本机识别没开启：只改配置。
+        None => {
+            let _ = state.worker.env().select_model(&id, &value);
+            state.worker.refresh_models_later();
+        }
+    }
+}
+
 #[tauri::command]
 fn worker_models_refresh(app: AppHandle) {
     shell(&app).worker.refresh_models_later();
@@ -749,6 +764,7 @@ fn main() {
             worker_model_delete,
             worker_models_refresh,
             worker_model_choices,
+            worker_model_select,
             gpu_prompt,
             gpu_choose
         ])

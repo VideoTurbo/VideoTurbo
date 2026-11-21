@@ -31,6 +31,21 @@ pub struct ModelInfo {
     pub downloaded: bool,
     /// 当前识别模式需要。
     pub needed: bool,
+    /// 当前用的版本（worker.yaml 里的值）；没有版本可选时为 None。
+    #[serde(default)]
+    pub variant: Option<String>,
+    #[serde(default)]
+    pub variants: Vec<VariantInfo>,
+}
+
+/// 模型的一个版本（例如 Qwen3-ASR 1.7B / 0.6B）。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VariantInfo {
+    pub value: String,
+    pub label: String,
+    pub size_mb: Option<u64>,
+    #[serde(default)]
+    pub downloaded: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,10 +59,17 @@ pub struct ModelStatus {
 }
 
 impl ModelStatus {
-    /// 已下载的模型（排好序），用来判断自检是否覆盖了所有模型。
+    /// 已下载的模型（排好序，带版本，例如 qwen3-asr@Qwen/Qwen3-ASR-0.6B），用来判断自检是否覆盖了所有模型。
     pub fn downloaded(&self) -> Vec<String> {
-        let mut ids: Vec<String> =
-            self.models.iter().filter(|model| model.downloaded).map(|model| model.id.clone()).collect();
+        let mut ids: Vec<String> = self
+            .models
+            .iter()
+            .filter(|model| model.downloaded)
+            .map(|model| match &model.variant {
+                Some(variant) => format!("{}@{variant}", model.id),
+                None => model.id.clone(),
+            })
+            .collect();
         ids.sort();
         ids
     }
@@ -68,6 +90,8 @@ struct DefaultModel {
     purpose_zh: String,
     purpose_en: String,
     size_mb: u64,
+    variant: Option<String>,
+    variants: Vec<VariantInfo>,
 }
 
 /// 识别模式需要的模型。
@@ -103,6 +127,8 @@ pub fn default_catalog(mode: Option<ModeInfo>) -> ModelStatus {
             purpose_en: model.purpose_en,
             size_mb: Some(model.size_mb),
             downloaded: false,
+            variant: model.variant,
+            variants: model.variants,
         })
         .collect();
     let missing = models.iter().filter(|model| model.needed).map(|model| model.id.clone()).collect();
@@ -210,6 +236,19 @@ impl WorkerEnv {
         }
     }
 
+    /// 改用模型的另一个版本（写进这台电脑的 worker.yaml）。
+    pub fn select_model(&self, id: &str, value: &str) -> Result<(), InstallError> {
+        let mut spec = self.spec(self.venv_python(), self.catalog_args(&["select", id, value]), &[]);
+        spec.output = self.logs().join("models.log");
+        let status =
+            process::run_lines(&spec, |_| {}).map_err(|error| InstallError::Failed(error.to_string()))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(InstallError::Failed(format!("切换模型版本失败（退出码 {}）", status.code().unwrap_or(-1))))
+        }
+    }
+
     pub fn delete_model(&self, id: &str) -> Result<(), InstallError> {
         let mut spec = self.spec(self.venv_python(), self.catalog_args(&["delete", id]), &[]);
         spec.output = self.logs().join("models.log");
@@ -275,6 +314,9 @@ mod tests {
         assert!(unknown.mode.is_none());
         assert_eq!(unknown.models.len(), 3);
         assert!(unknown.models.iter().all(|model| !model.downloaded && model.size_mb.is_some()));
+        let labels: Vec<&str> = unknown.models[2].variants.iter().map(|v| v.label.as_str()).collect();
+        assert_eq!(labels, ["large-v3", "large-v3-turbo", "medium", "small"]);
+        assert_eq!(unknown.models[0].variant.as_deref(), Some("Qwen/Qwen3-ASR-1.7B"));
     }
 
     #[test]
@@ -288,6 +330,9 @@ mod tests {
             "missing": ["anime-whisper"], "runtime_ready": true}"#;
         let status: ModelStatus = serde_json::from_str(json).unwrap();
         assert_eq!(status.downloaded(), vec!["qwen3-asr".to_string()]);
+        let mut with_variant = status.clone();
+        with_variant.models[0].variant = Some("Qwen/Qwen3-ASR-0.6B".into());
+        assert_eq!(with_variant.downloaded(), vec!["qwen3-asr@Qwen/Qwen3-ASR-0.6B".to_string()]);
         assert_eq!(status.missing, vec!["anime-whisper".to_string()]);
         assert_eq!(status.find("faster-whisper").unwrap().size_mb, None);
     }
