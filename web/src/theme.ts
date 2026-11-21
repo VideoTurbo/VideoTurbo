@@ -2,6 +2,7 @@
 // Naive UI 组件读这里的 themeOverrides，两边的色值保持一致。
 import { darkTheme, lightTheme, type GlobalThemeOverrides } from 'naive-ui'
 import { computed, ref, watchEffect } from 'vue'
+import { shellInvoke } from '@/lib/shell'
 
 export type ThemeName = 'dark' | 'light'
 const STORAGE_KEY = 'video-turbo-theme'
@@ -80,17 +81,6 @@ function overrides(p: Palette): GlobalThemeOverrides {
 export type ThemeMode = 'system' | ThemeName
 const MODES: readonly ThemeMode[] = ['system', 'light', 'dark']
 
-interface ShellBridge {
-  invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>
-}
-declare global {
-  interface Window {
-    __TAURI_INTERNALS__?: ShellBridge
-    /** 桌面版外壳在页面加载前写入它记住的主题，换了端口、本地存储为空时沿用。 */
-    __VIDEO_TURBO_SHELL_THEME__?: string
-  }
-}
-
 function isMode(value: unknown): value is ThemeMode {
   return MODES.includes(value as ThemeMode)
 }
@@ -123,11 +113,7 @@ watchEffect(() => {
 
 /** 桌面版：让外壳的窗口跟着变。浏览器里没有外壳，什么也不做。 */
 async function syncShell(mode: ThemeMode): Promise<void> {
-  try {
-    await window.__TAURI_INTERNALS__?.invoke('set_theme', { theme: mode })
-  } catch {
-    // 旧版外壳没有这个命令，忽略即可。
-  }
+  await shellInvoke('set_theme', { theme: mode })
   // 窗口强制深/浅色时，网页读到的“系统深浅色”也会跟着变；改回跟随系统后重新读一次。
   systemTheme.value = systemQuery.matches ? 'light' : 'dark'
 }

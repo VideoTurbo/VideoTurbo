@@ -4,6 +4,7 @@
 //!   控制台是主程序提供的网页，只能调用外壳的 set_theme（见 capabilities/console.json），
 //!   让窗口标题栏和外壳自己的页面跟控制台用同一种深浅色。
 //! - macOS 主窗口用透明标题栏：控制台顶栏铺到窗口顶端，窗口按钮叠在顶栏左侧。
+//!   Windows 主窗口去掉系统标题栏：控制台顶栏就是标题栏，右侧由页面画窗口按钮。
 //! - 关闭主窗口只是隐藏，主程序继续在后台处理；从托盘菜单“退出”才会停止主程序。
 //! - 开机自启时带 --autostart 参数，只在托盘里运行，不弹出窗口。
 
@@ -76,11 +77,13 @@ fn show_main(app: &AppHandle) {
 fn create_main(app: &AppHandle, visible: bool) -> tauri::Result<()> {
     let theme = current_theme(app);
     // 每次加载页面前执行：告诉控制台外壳记住的主题（换了端口、浏览器存储为空时沿用），
-    // 以及 macOS 上顶栏要给窗口按钮让位。
-    let mut script = format!("window.__VIDEO_TURBO_SHELL_THEME__ = '{}';", theme_name(theme));
-    if cfg!(target_os = "macos") {
-        script.push_str("document.documentElement.dataset.titlebar = 'overlay';");
-    }
+    // 以及标题栏的样式：macOS 是透明标题栏（overlay），顶栏给左上角的窗口按钮让位；
+    // Windows 没有系统标题栏（custom），页面自己在顶栏右侧画最小化、最大化、关闭按钮。
+    let titlebar = if cfg!(target_os = "macos") { "overlay" } else { "custom" };
+    let script = format!(
+        "window.__VIDEO_TURBO_SHELL_THEME__ = '{}'; document.documentElement.dataset.titlebar = '{titlebar}';",
+        theme_name(theme)
+    );
     let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
         .title("VideoTurbo")
         .inner_size(1280.0, 820.0)
@@ -94,6 +97,9 @@ fn create_main(app: &AppHandle, visible: bool) -> tauri::Result<()> {
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true)
         .traffic_light_position(tauri::LogicalPosition::new(18.0, 24.0));
+    // 去掉系统标题栏后仍保留窗口阴影、拖边缩放和 Windows 11 的圆角。
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.decorations(false).shadow(true);
     builder.build()?;
     Ok(())
 }

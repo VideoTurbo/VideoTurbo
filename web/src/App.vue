@@ -6,6 +6,7 @@ import { api } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import { naiveDateLocale, naiveLocale, t } from '@/i18n'
 import { toast } from '@/lib/feedback'
+import { titlebar } from '@/lib/shell'
 import { switchTab, tab, type Tab } from '@/stores/navigation'
 import { noticesOpen, unread } from '@/stores/notices'
 import { refreshStatus, status } from '@/stores/status'
@@ -16,6 +17,7 @@ import LlmView from '@/views/llm/LlmView.vue'
 import RestoreView from '@/views/restore/RestoreView.vue'
 import SettingsView from '@/views/settings/SettingsView.vue'
 import NoticesDrawer from '@/views/shell/NoticesDrawer.vue'
+import WindowControls from '@/views/shell/WindowControls.vue'
 import ScanDialog from '@/views/shell/ScanDialog.vue'
 import SubtitleView from '@/views/subtitle/SubtitleView.vue'
 
@@ -36,8 +38,8 @@ const themeOptions = computed<DropdownOption[]>(() => (['system', 'light', 'dark
 })))
 const themeTitle = computed(() => t('app.theme.current', { mode: themeLabel(themeMode.value) }))
 
-// 桌面版 macOS：标题栏透明，顶栏让出左上角的窗口按钮，空白处可拖动窗口。
-const overlayTitlebar = document.documentElement.dataset.titlebar === 'overlay'
+// 桌面版：顶栏就是窗口标题栏，空白处可拖动、双击最大化。macOS 让出左上角的系统窗口按钮，Windows 在右侧画窗口按钮。
+const dragRegion = titlebar ? 'deep' : undefined
 
 // ---- 顶栏只有一个扫描按钮：平时“扫描影片”，扫描中变成“停止扫描” ----
 const scanning = computed(() => status.value?.scan_status === 'running')
@@ -66,7 +68,7 @@ async function stopScan(): Promise<void> {
 
 <template>
   <NConfigProvider :theme="naiveTheme" :theme-overrides="naiveOverrides" :locale="naiveLocale" :date-locale="naiveDateLocale">
-    <header class="topbar" :data-tauri-drag-region="overlayTitlebar ? 'deep' : undefined">
+    <header class="topbar" :data-tauri-drag-region="dragRegion">
       <div class="topbar-inner">
         <a class="brand" href="/" :aria-label="t('app.brandHome')">
           <!-- 图标由主控提供，不经过打包，所以用绑定写法。 -->
@@ -105,6 +107,7 @@ async function stopScan(): Promise<void> {
           </NButton>
         </div>
       </div>
+      <WindowControls v-if="titlebar === 'custom'" />
     </header>
 
     <main class="shell">

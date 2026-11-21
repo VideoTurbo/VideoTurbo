@@ -25,6 +25,11 @@
 </head>
 <body>
   <div class="drag" data-tauri-drag-region></div>
+  <div class="window-controls" id="controls" hidden>
+    <button type="button" id="win-min"><svg viewBox="0 0 10 10"><path d="M0 5.5h10"/></svg></button>
+    <button type="button" id="win-max"><svg viewBox="0 0 10 10"><path d="M.5.5h9v9h-9z"/></svg></button>
+    <button type="button" id="win-close" class="close"><svg viewBox="0 0 10 10"><path d="M.5.5l9 9M9.5.5l-9 9"/></svg></button>
+  </div>
   <main>
     <div class="box">
       <img class="logo" src="logo.png" alt="">
@@ -55,6 +60,17 @@
     $('logs').textContent = T.logs
     $('retry').onclick = () => { invoke('restart_server'); show({ phase: 'starting' }) }
     $('logs').onclick = () => invoke('open_logs')
+
+    // Windows 没有系统标题栏：右上角画窗口按钮（关闭只是隐藏窗口）。
+    if (document.documentElement.dataset.titlebar === 'custom') {
+      const T2 = zh ? { min: '最小化', max: '最大化', close: '关闭' } : { min: 'Minimize', max: 'Maximize', close: 'Close' }
+      for (const [id, cmd, label] of [['win-min', 'minimize', T2.min], ['win-max', 'toggle_maximize', T2.max], ['win-close', 'close', T2.close]]) {
+        $(id).title = label
+        $(id).setAttribute('aria-label', label)
+        $(id).onclick = () => invoke('plugin:window|' + cmd)
+      }
+      $('controls').hidden = false
+    }
 
     function show(state) {
       const failed = state.phase === 'failed' || state.phase === 'stopped'
