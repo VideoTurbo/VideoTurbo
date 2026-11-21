@@ -42,14 +42,13 @@ def write(root, name, content):
 def test_package_includes_deployment_sources_without_local_secrets(project, tmp_path, packager):
     safe_files = {
         "src/video_turbo/worker/main.py": b"# source including uncommitted changes\n",
-        "deploy/worker/windows/extra.ps1": b"\xef\xbb\xbfWrite-Host 'test'\r\n",
         "deploy/worker/linux/worker.sh": b"#!/bin/sh\necho test\n",
         "README.en.md": b"# English readme\n",
         "tools/package_release.py": b"# packaging tool\n",
     }
     sensitive_files = (
         ".env", "deploy/server/.env", "deploy/server/docker-compose.yml", "config/worker.yaml",
-        "deploy/worker/windows/private.key", "deploy/worker/linux/worker.log", "config/models/weights.bin",
+        "deploy/worker/linux/worker.log", "config/models/weights.bin",
         "src/video_turbo/__pycache__/stale.py", "src/video_turbo/__pycache__/main.pyc",
         "src/video_turbo/.local.py", "src/video_turbo/cache/private.py",
         "work/job/audio.opus", "runtime/local.db", "logs/worker.log",

@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--default-download-root", required=True)
     parser.add_argument(
         "--shared-machine", action="store_true",
-        help="新建配置时开启空闲检测（与日常使用共用显卡的电脑，Windows 安装脚本使用）",
+        help="新建配置时开启空闲检测（与日常使用共用显卡的电脑）",
     )
     parser.add_argument(
         "--non-interactive", action="store_true",

@@ -1,1 +1,1 @@
-"""Windows GPU Worker。"""
+"""显卡电脑上的识别和影片修复服务（Worker）。"""

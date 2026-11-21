@@ -34,8 +34,6 @@ REQUIRED_FILES = (
     "config/worker.example.yaml",
     "deploy/server/Dockerfile",
     "deploy/server/docker-compose.example.yml",
-    "deploy/worker/windows/worker.ps1",
-    "deploy/worker/windows/run-hidden.vbs",
     "deploy/worker/linux/worker.sh",
     "deploy/worker/requirements/asr.txt",
     "deploy/worker/requirements/restore.txt",
@@ -57,8 +55,6 @@ SOURCE_PATTERNS = (
     "web/src/**/*.vue",
     "web/src/**/*.css",
     "config/*.example.yaml",
-    "deploy/worker/windows/*.ps1",
-    "deploy/worker/windows/*.vbs",
     "deploy/worker/linux/*.sh",
     "deploy/worker/requirements/*.txt",
     "deploy/server/*.example.yml",
@@ -73,7 +69,8 @@ EXCLUDED_DIRECTORIES = {
 
 UPDATE_GUIDE = """video-turbo 更新说明
 
-本目录是 Windows、Linux 显卡电脑上服务的安装与更新包（主程序使用 Docker 镜像，不需要本目录），不含配置、密钥、数据库、模型和日志。
+本目录是 Linux 显卡电脑上服务的安装与更新包（主程序使用 Docker 镜像或桌面版安装包，Windows 显卡电脑使用
+VideoTurbo Worker 安装包，都不需要本目录），不含配置、密钥、数据库、模型和日志。
 
 1. 等正在处理的任务结束，停止显卡电脑上的服务。
 2. 把本目录的内容合并覆盖到原项目文件夹（不要先删除原文件夹，也不要再嵌套一层 video-turbo）。
@@ -85,9 +82,7 @@ UPDATE_GUIDE = """video-turbo 更新说明
 主程序：在 docker-compose.yml 所在的文件夹执行
   docker compose pull && docker compose up -d
 
-Windows 显卡电脑：在项目文件夹的 PowerShell 中执行
-  .\\deploy\\worker\\windows\\worker.ps1 install
-  .\\deploy\\worker\\windows\\worker.ps1 start
+Windows 显卡电脑：下载并安装新版 VideoTurbo Worker，它会自动更新运行环境。
 
 Linux 显卡电脑：在项目文件夹中执行
   bash deploy/worker/linux/worker.sh install asr      （装了影片修复时用 install all）
