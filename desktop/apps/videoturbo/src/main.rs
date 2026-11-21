@@ -1,7 +1,9 @@
 //! VideoTurbo 桌面版：托盘常驻，管理主程序子进程，在应用内窗口里打开控制台。
 //!
 //! - 主窗口先显示启动页（ui/index.html），主程序就绪后跳到控制台 http://127.0.0.1:端口/。
-//!   控制台是主程序提供的网页，不在 capabilities 里，拿不到外壳的接口。
+//!   控制台是主程序提供的网页，只能调用外壳的 set_theme（见 capabilities/console.json），
+//!   让窗口标题栏和外壳自己的页面跟控制台用同一种深浅色。
+//! - macOS 主窗口用透明标题栏：控制台顶栏铺到窗口顶端，窗口按钮叠在顶栏左侧。
 //! - 关闭主窗口只是隐藏，主程序继续在后台处理；从托盘菜单“退出”才会停止主程序。
 //! - 开机自启时带 --autostart 参数，只在托盘里运行，不弹出窗口。
 
@@ -11,7 +13,7 @@ mod server;
 mod texts;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use shell_core::locale::Lang;
@@ -19,7 +21,7 @@ use shell_core::logfile::Logger;
 use shell_core::settings::ServerSettings;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
+use tauri::{AppHandle, Manager, RunEvent, Theme, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_opener::OpenerExt as _;
 
@@ -42,6 +44,9 @@ struct Shell {
     status_item: MenuItem<Wry>,
     worker_item: MenuItem<Wry>,
     autostart_item: CheckMenuItem<Wry>,
+    /// 控制台选的主题：None 为跟随系统。记在数据文件夹里，下次打开时窗口一出现就是这个颜色。
+    theme: Mutex<Option<Theme>>,
+    theme_file: PathBuf,
 }
 
 fn shell(app: &AppHandle) -> tauri::State<'_, Shell> {
@@ -69,13 +74,49 @@ fn show_main(app: &AppHandle) {
 }
 
 fn create_main(app: &AppHandle, visible: bool) -> tauri::Result<()> {
-    WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
+    let theme = current_theme(app);
+    // 每次加载页面前执行：告诉控制台外壳记住的主题（换了端口、浏览器存储为空时沿用），
+    // 以及 macOS 上顶栏要给窗口按钮让位。
+    let mut script = format!("window.__VIDEO_TURBO_SHELL_THEME__ = '{}';", theme_name(theme));
+    if cfg!(target_os = "macos") {
+        script.push_str("document.documentElement.dataset.titlebar = 'overlay';");
+    }
+    let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))
         .title("VideoTurbo")
         .inner_size(1280.0, 820.0)
         .min_inner_size(900.0, 600.0)
-        .visible(visible)
-        .build()?;
+        .theme(theme)
+        .initialization_script(script)
+        .visible(visible);
+    // 窗口按钮摆在 52px 高的顶栏中线上。
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(18.0, 24.0));
+    builder.build()?;
     Ok(())
+}
+
+fn current_theme(app: &AppHandle) -> Option<Theme> {
+    *shell(app).theme.lock().unwrap()
+}
+
+fn theme_name(theme: Option<Theme>) -> &'static str {
+    match theme {
+        Some(Theme::Light) => "light",
+        Some(Theme::Dark) => "dark",
+        _ => "system",
+    }
+}
+
+/// 读记住的主题；文件不存在或内容不认识时跟随系统。
+fn load_theme(file: &std::path::Path) -> Option<Theme> {
+    match std::fs::read_to_string(file).unwrap_or_default().trim() {
+        "light" => Some(Theme::Light),
+        "dark" => Some(Theme::Dark),
+        _ => None,
+    }
 }
 
 /// 主程序重新启动后，已打开的控制台连不上了：主窗口回到启动页，等新进程就绪。
@@ -100,6 +141,7 @@ fn show_settings(app: &AppHandle) {
     let title = shell(app).texts.settings_title();
     let _ = WebviewWindowBuilder::new(app, SETTINGS, WebviewUrl::App("settings.html".into()))
         .title(title)
+        .theme(current_theme(app))
         .inner_size(560.0, 620.0)
         .resizable(false)
         .build();
@@ -114,6 +156,7 @@ fn show_worker(app: &AppHandle) {
     let title = shell(app).texts.local_worker_title();
     let _ = WebviewWindowBuilder::new(app, WORKER, WebviewUrl::App("worker.html".into()))
         .title(title)
+        .theme(current_theme(app))
         .inner_size(600.0, 520.0)
         .resizable(false)
         .build();
@@ -208,6 +251,35 @@ fn toggle_autostart(app: &AppHandle) {
 }
 
 // ---------------------------------------------------------------- 外壳页面调用的命令
+
+/// 控制台切换主题时调用（这是控制台唯一能调用的命令）：system / light / dark。
+#[tauri::command]
+fn set_theme(app: AppHandle, theme: String) -> Result<(), String> {
+    let choice = match theme.as_str() {
+        "system" => None,
+        "light" => Some(Theme::Light),
+        "dark" => Some(Theme::Dark),
+        _ => return Err(format!("unknown theme: {theme}")),
+    };
+    let state = shell(&app);
+    {
+        let mut current = state.theme.lock().unwrap();
+        if *current == choice {
+            return Ok(());
+        }
+        *current = choice;
+    }
+    if let Some(dir) = state.theme_file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(error) = std::fs::write(&state.theme_file, theme_name(choice)) {
+        state.logger.info(&format!("无法保存主题：{error}"));
+    }
+    for window in app.webview_windows().values() {
+        let _ = window.set_theme(choice);
+    }
+    Ok(())
+}
 
 #[tauri::command]
 fn server_state(app: AppHandle) -> Phase {
@@ -383,6 +455,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     ));
     let texts = Arc::new(Texts::new(Lang::detect()));
     let settings = ServerSettings::load(&paths.settings_file());
+    let theme_file = home.join("desktop-theme");
+    let theme = Mutex::new(load_theme(&theme_file));
 
     let status_item = MenuItem::with_id(app, "status", texts.status_stopped(), false, None::<&str>)?;
     let worker_item =
@@ -440,6 +514,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         status_item,
         worker_item,
         autostart_item,
+        theme,
+        theme_file,
     };
     build_tray(&handle, &state)?;
     app.manage(state);
@@ -459,6 +535,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            set_theme,
             server_state,
             restart_server,
             open_logs,

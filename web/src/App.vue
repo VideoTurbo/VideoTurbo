@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 外壳：顶栏、主导航和当前页面。页面用 KeepAlive 保留筛选与勾选状态。
-import { NButton, NConfigProvider, NTooltip } from 'naive-ui'
-import { computed, ref, type Component } from 'vue'
+import { NButton, NConfigProvider, NDropdown, NTooltip, type DropdownOption } from 'naive-ui'
+import { computed, h, ref, type Component } from 'vue'
 import { api } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import { naiveDateLocale, naiveLocale, t } from '@/i18n'
@@ -9,7 +9,8 @@ import { toast } from '@/lib/feedback'
 import { switchTab, tab, type Tab } from '@/stores/navigation'
 import { noticesOpen, unread } from '@/stores/notices'
 import { refreshStatus, status } from '@/stores/status'
-import { naiveOverrides, naiveTheme, themeName, toggleTheme } from '@/theme'
+import type { IconName } from '@/components/icons'
+import { naiveOverrides, naiveTheme, setThemeMode, themeMode, type ThemeMode } from '@/theme'
 import ComputeView from '@/views/compute/ComputeView.vue'
 import LlmView from '@/views/llm/LlmView.vue'
 import RestoreView from '@/views/restore/RestoreView.vue'
@@ -24,6 +25,19 @@ const tabs: { id: Tab; label: string }[] = [
 ]
 
 const scanOpen = ref(false)
+
+// ---- 主题：跟随系统 / 日间 / 夜间 ----
+const themeIcons: Record<ThemeMode, IconName> = { system: 'monitor', light: 'sun', dark: 'moon' }
+const themeLabel = (mode: ThemeMode) => t(`app.theme.${mode}` as const)
+const themeOptions = computed<DropdownOption[]>(() => (['system', 'light', 'dark'] as const).map((mode) => ({
+  key: mode,
+  icon: () => h(AppIcon, { name: themeIcons[mode] }),
+  label: () => h('span', { class: 'theme-option' }, [themeLabel(mode), themeMode.value === mode ? h(AppIcon, { name: 'check' }) : null]),
+})))
+const themeTitle = computed(() => t('app.theme.current', { mode: themeLabel(themeMode.value) }))
+
+// 桌面版 macOS：标题栏透明，顶栏让出左上角的窗口按钮，空白处可拖动窗口。
+const overlayTitlebar = document.documentElement.dataset.titlebar === 'overlay'
 
 // ---- 顶栏只有一个扫描按钮：平时“扫描影片”，扫描中变成“停止扫描” ----
 const scanning = computed(() => status.value?.scan_status === 'running')
@@ -52,7 +66,7 @@ async function stopScan(): Promise<void> {
 
 <template>
   <NConfigProvider :theme="naiveTheme" :theme-overrides="naiveOverrides" :locale="naiveLocale" :date-locale="naiveDateLocale">
-    <header class="topbar">
+    <header class="topbar" :data-tauri-drag-region="overlayTitlebar ? 'deep' : undefined">
       <div class="topbar-inner">
         <a class="brand" href="/" :aria-label="t('app.brandHome')">
           <!-- 图标由主控提供，不经过打包，所以用绑定写法。 -->
@@ -81,9 +95,11 @@ async function stopScan(): Promise<void> {
             </template>
             {{ t('app.noticesTip') }}
           </NTooltip>
-          <NButton quaternary :aria-label="themeName === 'light' ? t('app.theme.dark') : t('app.theme.light')" :title="themeName === 'light' ? t('app.theme.dark') : t('app.theme.light')" @click="toggleTheme">
-            <template #icon><AppIcon :name="themeName === 'light' ? 'moon' : 'sun'" /></template>
-          </NButton>
+          <NDropdown trigger="click" placement="bottom-end" :options="themeOptions" @select="(mode: ThemeMode) => setThemeMode(mode)">
+            <NButton quaternary :aria-label="themeTitle" :title="themeTitle">
+              <template #icon><AppIcon :name="themeIcons[themeMode]" /></template>
+            </NButton>
+          </NDropdown>
           <NButton quaternary :aria-label="t('app.settings')" :title="t('app.settings')" :type="tab === 'settings' ? 'primary' : 'default'" @click="switchTab('settings')">
             <template #icon><AppIcon name="gear" /></template>
           </NButton>

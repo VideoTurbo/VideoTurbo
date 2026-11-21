@@ -32,4 +32,7 @@ input[type="number"], input[type="text"] {
   border-radius: 8px; padding: 6px 10px; width: 100%;
 }
 .muted { color: var(--muted); }
+/* macOS 主窗口的透明标题栏：页面顶端一条可拖动窗口。 */
+.drag { display: none; }
+:root[data-titlebar="overlay"] .drag { display: block; position: fixed; top: 0; left: 0; right: 0; height: 52px; }
 .bad { color: var(--bad); }

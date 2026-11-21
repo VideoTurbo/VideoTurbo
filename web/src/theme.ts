@@ -1,7 +1,7 @@
 // 主题配色。布局样式读 styles/base.css 里的 CSS 变量，
 // Naive UI 组件读这里的 themeOverrides，两边的色值保持一致。
 import { darkTheme, lightTheme, type GlobalThemeOverrides } from 'naive-ui'
-import { computed, ref } from 'vue'
+import { computed, ref, watchEffect } from 'vue'
 
 export type ThemeName = 'dark' | 'light'
 const STORAGE_KEY = 'video-turbo-theme'
@@ -74,20 +74,72 @@ function overrides(p: Palette): GlobalThemeOverrides {
   }
 }
 
-function stored(): ThemeName {
-  return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'
+// ---- 主题模式：跟随系统（默认）/ 日间 / 夜间 ----
+// 选择存在本浏览器里；桌面版还会告诉外壳，让窗口标题栏和外壳自己的页面用同一种深浅色。
+
+export type ThemeMode = 'system' | ThemeName
+const MODES: readonly ThemeMode[] = ['system', 'light', 'dark']
+
+interface ShellBridge {
+  invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown>
+}
+declare global {
+  interface Window {
+    __TAURI_INTERNALS__?: ShellBridge
+    /** 桌面版外壳在页面加载前写入它记住的主题，换了端口、本地存储为空时沿用。 */
+    __VIDEO_TURBO_SHELL_THEME__?: string
+  }
 }
 
-export const themeName = ref<ThemeName>(stored())
+function isMode(value: unknown): value is ThemeMode {
+  return MODES.includes(value as ThemeMode)
+}
+
+function storedMode(): ThemeMode {
+  try {
+    const value = localStorage.getItem(STORAGE_KEY)
+    if (isMode(value)) return value
+  } catch {
+    // 存储不可用时按下面的默认值处理。
+  }
+  const shell = window.__VIDEO_TURBO_SHELL_THEME__
+  return isMode(shell) ? shell : 'system'
+}
+
+const systemQuery = window.matchMedia('(prefers-color-scheme: light)')
+const systemTheme = ref<ThemeName>(systemQuery.matches ? 'light' : 'dark')
+systemQuery.addEventListener('change', (event) => {
+  systemTheme.value = event.matches ? 'light' : 'dark'
+})
+
+export const themeMode = ref<ThemeMode>(storedMode())
+export const themeName = computed<ThemeName>(() => (themeMode.value === 'system' ? systemTheme.value : themeMode.value))
 export const naiveTheme = computed(() => (themeName.value === 'light' ? lightTheme : darkTheme))
 export const naiveOverrides = computed(() => overrides(palettes[themeName.value]))
 
-export function toggleTheme(): void {
-  themeName.value = themeName.value === 'light' ? 'dark' : 'light'
+watchEffect(() => {
   document.documentElement.dataset.theme = themeName.value
+})
+
+/** 桌面版：让外壳的窗口跟着变。浏览器里没有外壳，什么也不做。 */
+async function syncShell(mode: ThemeMode): Promise<void> {
   try {
-    localStorage.setItem(STORAGE_KEY, themeName.value)
+    await window.__TAURI_INTERNALS__?.invoke('set_theme', { theme: mode })
+  } catch {
+    // 旧版外壳没有这个命令，忽略即可。
+  }
+  // 窗口强制深/浅色时，网页读到的“系统深浅色”也会跟着变；改回跟随系统后重新读一次。
+  systemTheme.value = systemQuery.matches ? 'light' : 'dark'
+}
+
+export function setThemeMode(mode: ThemeMode): void {
+  themeMode.value = mode
+  try {
+    localStorage.setItem(STORAGE_KEY, mode)
   } catch {
     // 存储不可用时仍可切换，只是刷新后不保留。
   }
+  void syncShell(mode)
 }
+
+void syncShell(themeMode.value)

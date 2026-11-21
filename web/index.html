@@ -6,10 +6,15 @@
     <title>VideoTurbo</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <script>
-      // 提前恢复主题，避免刷新时先闪现暗色页面。
+      // 提前恢复主题，避免刷新时先闪现另一种深浅色。规则与 src/theme.ts 一致。
       try {
-        document.documentElement.dataset.theme =
-          localStorage.getItem('video-turbo-theme') === 'light' ? 'light' : 'dark'
+        var mode = null
+        try { mode = localStorage.getItem('video-turbo-theme') } catch (error) {}
+        if (mode !== 'light' && mode !== 'dark' && mode !== 'system') mode = window.__VIDEO_TURBO_SHELL_THEME__
+        if (mode !== 'light' && mode !== 'dark') {
+          mode = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+        }
+        document.documentElement.dataset.theme = mode
       } catch (error) {}
     </script>
   </head>
