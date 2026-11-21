@@ -21,6 +21,7 @@ from ..media_servers.emby import EmbyServer, JellyfinServer
 from ..media_servers.fnos import FnosServer
 from ..media_servers.plex import PlexServer
 from ..media_sources import base as source_base
+from ..media_sources.webdav import WebDavSource
 from ..notifiers import base as notifier_base
 from ..notifiers.webhook import WebhookNotifier
 from ..plugins.base import localize_plugin
@@ -77,7 +78,7 @@ KINDS: dict[str, PluginKind] = {
             source_base.PLUGIN_API_MIN_VERSION,
             "video_turbo.media_sources",
             # 本地文件夹是内置来源（media_sources.local），不是插件。
-            (),
+            (WebDavSource,),
         ),
         PluginKind(
             "notifier",
@@ -129,6 +130,11 @@ def providers(kind: str) -> dict[str, type]:
 
 def get(kind: str, plugin_id: str) -> type | None:
     return _all()[kind].get(plugin_id)
+
+
+def is_builtin(kind: str, plugin_id: str) -> bool:
+    """plugin_id 是不是这一类的内置插件（随主程序代码提供）。"""
+    return any(plugin.id == plugin_id for plugin in KINDS[kind].builtin)
 
 
 def find(plugin_id: str) -> tuple[str, type] | None:

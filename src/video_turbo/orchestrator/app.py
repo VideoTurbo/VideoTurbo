@@ -9,6 +9,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import Response
@@ -37,7 +38,7 @@ from .dashboard import ASSETS_DIR, FAVICON_SVG, dashboard_response
 from .diagnostics import LOG_FORMAT, install_log_buffer
 from .diagnostics import router as diagnostics_router
 from .i18n_middleware import I18nMiddleware
-from .integrations import MediaRefresher, NoticeService
+from .integrations import ConnectionStatus, MediaRefresher, NoticeService
 from .jobs_api import router as jobs_router
 from .libraries_api import router as libraries_router
 from .local_worker import LocalWorkerStatus
@@ -206,6 +207,8 @@ async def lifespan(app: FastAPI):
     app.state.notices.start()
     _report_plugin_load(app.state.notices, plugin_installer.load_installed(database))
     app.state.media_refresher = MediaRefresher(database, app.state.notices, enabled=live)
+    # 网络存储的配置列表沿用媒体服务器的接口，最近一次调用结果暂不记录。
+    app.state.media_source_status = SimpleNamespace(status=ConnectionStatus())
     orchestrator.on_published = app.state.media_refresher.request
     app.state.restore.on_published = app.state.media_refresher.request
     app.state.cloud = CloudService(
