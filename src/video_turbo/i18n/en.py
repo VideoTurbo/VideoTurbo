@@ -686,6 +686,7 @@ MESSAGES: dict[str, str] = {
     "webhook.urlScheme": "The Webhook address must start with http:// or https://.",
     "webhook.urlCredentials": "The Webhook address can't contain a username or password.",
     "worker.protocolMismatch": "This machine and the main app use different communication protocol versions; upgrade both to the same version.",
+    "worker.noDownloadedModels": "No recognition models are downloaded yet. Download one from the model list.",
     "worker.modeMissing": "The chosen recognition mode {mode} isn't installed on this machine; run the install script again.",
     "worker.stage.preparing": "Preparing recognition",
     "worker.noDualPass": "{label} jobs can't use two-pass recognition.",

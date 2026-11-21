@@ -238,11 +238,13 @@ class WhisperJavTranscriber:
         steps = [
             (msg("worker.whisperjav.check.pass1", model=self.config.whisperjav.model), ["--check", "qwen", "--model", self.config.whisperjav.model]),
             (msg("worker.whisperjav.check.vad1", speech_segmenter=self.config.whisperjav.speech_segmenter), self._vad_check(self.config.whisperjav.speech_segmenter)),
-            (msg("worker.whisperjav.check.pass2", ANIME_MODEL=ANIME_MODEL), ["--check", "anime", "--model", ANIME_MODEL]),
         ]
-        if self.config.whisperjav.speech_segmenter != "ten":
-            steps.append((msg("worker.whisperjav.check.vad2"), self._vad_check("ten")))
-        steps.append((msg("worker.whisperjav.check.merge"), ["--check", "merge"]))
+        # 桌面版只检查已下载的模型：没下载第二遍模型（ensemble 为 False）时跳过第二遍和合并。
+        if self.ensemble or not self.config.asr.local_models_only:
+            steps.append((msg("worker.whisperjav.check.pass2", ANIME_MODEL=ANIME_MODEL), ["--check", "anime", "--model", ANIME_MODEL]))
+            if self.config.whisperjav.speech_segmenter != "ten":
+                steps.append((msg("worker.whisperjav.check.vad2"), self._vad_check("ten")))
+            steps.append((msg("worker.whisperjav.check.merge"), ["--check", "merge"]))
         logger.info("WhisperJAV 双遍自检：将提前下载缺失模型，串行加载检查后释放。")
         logger.info("Hugging Face 模型缓存：%s", self.config.asr.download_root / "huggingface")
         with tempfile.TemporaryDirectory(prefix="whisperjav-test-") as directory:

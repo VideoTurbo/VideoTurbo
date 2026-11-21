@@ -686,6 +686,7 @@ MESSAGES: dict[str, str] = {
     "webhook.urlScheme": "Webhook 地址必须以 http:// 或 https:// 开头。",
     "webhook.urlCredentials": "Webhook 地址中不能包含账号或密码。",
     "worker.protocolMismatch": "本机与主程序的通信协议版本不一致，请把两边升级到同一版本。",
+    "worker.noDownloadedModels": "还没有下载任何识别模型，请在模型清单里下载。",
     "worker.modeMissing": "这台机器未安装所选识别模式 {mode}，请重新运行安装脚本。",
     "worker.stage.preparing": "准备识别",
     "worker.noDualPass": "{label}任务不能使用双遍识别。",

@@ -78,7 +78,13 @@ fn status_text(lang: Lang, phase: &WorkerPhase) -> String {
             }
         }
         WorkerPhase::NeedTools => lang.pick("需要安装命令行工具", "Command line tools needed"),
-        WorkerPhase::SelfTest { .. } => lang.pick("正在下载模型并自检…", "Downloading models…"),
+        WorkerPhase::Models { done_mb, total_mb, .. } => {
+            return match lang {
+                Lang::Zh => format!("正在下载模型（{done_mb}/{total_mb} MB）…"),
+                Lang::En => format!("Downloading models ({done_mb}/{total_mb} MB)…"),
+            }
+        }
+        WorkerPhase::SelfTest { .. } => lang.pick("正在自检…", "Running the self-test…"),
         WorkerPhase::Running => lang.pick("运行中", "Running"),
         WorkerPhase::Conflict => lang
             .pick("主程序应用的本机识别正在使用显卡", "Local recognition in the main app is using the GPU"),
@@ -101,7 +107,7 @@ fn create_main(handle: &AppHandle, visible: bool) -> tauri::Result<()> {
     let lang = Lang::detect();
     WebviewWindowBuilder::new(handle, MAIN, WebviewUrl::App("index.html".into()))
         .title(lang.pick("VideoTurbo Worker", "VideoTurbo Worker"))
-        .inner_size(620.0, 560.0)
+        .inner_size(620.0, 760.0)
         .resizable(false)
         .visible(visible)
         .build()?;
@@ -232,6 +238,8 @@ struct View {
     paused: bool,
     platform: &'static str,
     nvidia: Option<bool>,
+    /// 模型清单（含当前识别模式、缺哪些模型）；运行环境没装好时为 None。
+    catalog: Option<shell_core::models::ModelStatus>,
 }
 
 #[tauri::command]
@@ -258,7 +266,38 @@ fn state(handle: AppHandle) -> View {
         paused: settings.paused,
         platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
         nvidia: worker_env::has_nvidia(),
+        catalog: state.worker.models(),
     }
+}
+
+/// 下载清单里选的模型（会停下识别程序，下载、自检后重新启动）。
+#[tauri::command]
+fn models_download(handle: AppHandle, ids: Vec<String>) {
+    let state = app(&handle);
+    let mut settings = load_settings(&state.settings_file);
+    settings.download_approved = true;
+    settings.paused = false;
+    save_settings(&state.settings_file, &settings);
+    state.worker.download_models(None, ids);
+}
+
+#[tauri::command]
+fn model_delete(handle: AppHandle, id: String) {
+    let state = app(&handle);
+    if load_settings(&state.settings_file).paused {
+        let worker = Arc::clone(&state.worker);
+        std::thread::spawn(move || {
+            let _ = worker.env().delete_model(&id);
+            worker.refresh_models();
+        });
+    } else {
+        state.worker.delete_model(None, id);
+    }
+}
+
+#[tauri::command]
+fn models_refresh(handle: AppHandle) {
+    app(&handle).worker.refresh_models_later();
 }
 
 /// 用接入串连接主程序（第一次设置或更换主程序）。`download` 为 true 时立即下载运行环境和模型，
@@ -407,6 +446,7 @@ fn setup(tauri_app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if !settings.paused {
         resume(&worker, &settings);
     }
+    worker.watch_models();
     Ok(())
 }
 
@@ -426,6 +466,9 @@ fn main() {
             download,
             pause,
             retry,
+            models_download,
+            model_delete,
+            models_refresh,
             open_logs,
             install_tools
         ])

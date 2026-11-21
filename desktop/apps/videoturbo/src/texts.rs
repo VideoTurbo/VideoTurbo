@@ -69,8 +69,14 @@ impl Texts {
             P::NeedTools => {
                 self.pick("本机识别：需要安装命令行工具", "Local recognition: command line tools needed")
             }
+            P::Models { done_mb, total_mb, .. } => {
+                return match self.lang {
+                    Lang::Zh => format!("本机识别：正在下载模型（{done_mb}/{total_mb} MB）…"),
+                    Lang::En => format!("Local recognition: downloading models ({done_mb}/{total_mb} MB)…"),
+                }
+            }
             P::SelfTest { .. } => {
-                self.pick("本机识别：正在下载模型并自检…", "Local recognition: downloading models…")
+                self.pick("本机识别：正在自检…", "Local recognition: running the self-test…")
             }
             P::Running => self.pick("本机识别：运行中", "Local recognition: running"),
             P::Conflict => self.pick(

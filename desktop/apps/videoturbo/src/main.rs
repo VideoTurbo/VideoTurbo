@@ -25,6 +25,7 @@ use tauri_plugin_opener::OpenerExt as _;
 
 use server::{Paths, Phase, Server};
 use shell_core::connection::Connection;
+use shell_core::models::ModelStatus;
 use shell_core::worker_env::WorkerEnv;
 use shell_core::worker_manager::{Connect, WorkerManager, WorkerPhase};
 use shell_tauri::updater::{self, UpdateMenu};
@@ -118,7 +119,7 @@ fn show_worker(app: &AppHandle) {
     let title = shell(app).texts.local_worker_title();
     let _ = WebviewWindowBuilder::new(app, WORKER, WebviewUrl::App("worker.html".into()))
         .title(title)
-        .inner_size(600.0, 520.0)
+        .inner_size(620.0, 720.0)
         .resizable(false)
         .build();
 }
@@ -356,6 +357,8 @@ struct WorkerView {
     platform: &'static str,
     /// Windows 上是否检测到 NVIDIA 显卡（没有时只能用 CPU，很慢）；macOS 为 None。
     nvidia: Option<bool>,
+    /// 模型清单（含当前识别模式、缺哪些模型）；运行环境没装好时为 None。
+    catalog: Option<ModelStatus>,
 }
 
 #[tauri::command]
@@ -370,6 +373,54 @@ fn worker_view(state: &Shell) -> WorkerView {
         ready: state.worker.ready_to_run(),
         platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
         nvidia: shell_core::worker_env::has_nvidia(),
+        catalog: state.worker.models(),
+    }
+}
+
+/// 下载清单里选的模型（会停下识别程序，下载、自检后重新启动）。
+#[tauri::command]
+fn worker_models_download(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let state = shell(&app);
+    state
+        .server
+        .update_flags(|settings| {
+            settings.local_worker = true;
+            settings.local_worker_download = true;
+        })
+        .map_err(|error| error.to_string())?;
+    state.worker.download_models(Some(local_connection(Arc::clone(&state.server))), ids);
+    Ok(())
+}
+
+#[tauri::command]
+fn worker_model_delete(app: AppHandle, id: String) {
+    let state = shell(&app);
+    let connect = state.server.settings().local_worker.then(|| local_connection(Arc::clone(&state.server)));
+    match connect {
+        Some(connect) => state.worker.delete_model(Some(connect), id),
+        // 本机识别没开启：只删除，不启动。
+        None => {
+            let worker = Arc::clone(&state.worker);
+            std::thread::spawn(move || {
+                let _ = worker.env().delete_model(&id);
+                worker.refresh_models();
+            });
+        }
+    }
+}
+
+#[tauri::command]
+fn worker_models_refresh(app: AppHandle) {
+    shell(&app).worker.refresh_models_later();
+}
+
+/// 控制台点了“开始下载”：第一次设置时按“立即下载”开启；已有模型时下载当前识别模式缺的模型。
+fn download_needed(app: &AppHandle) -> Result<(), String> {
+    let state = shell(app);
+    let missing = state.worker.models().filter(|catalog| !catalog.downloaded().is_empty()).map(|c| c.missing);
+    match missing {
+        Some(ids) if !ids.is_empty() => worker_models_download(app.clone(), ids),
+        _ => set_local_worker(app, true, true),
     }
 }
 
@@ -397,6 +448,45 @@ fn set_local_worker(app: &AppHandle, enabled: bool, download: bool) -> Result<()
     Ok(())
 }
 
+/// 上报给主程序的本机识别状态：窗口用的状态，加上当前识别模式缺的模型（名称和大小）。
+#[derive(Serialize)]
+struct LocalReport {
+    #[serde(flatten)]
+    view: WorkerView,
+    missing: Vec<MissingModel>,
+}
+
+#[derive(Serialize)]
+struct MissingModel {
+    id: String,
+    zh: String,
+    en: String,
+    size_mb: Option<u64>,
+}
+
+impl LocalReport {
+    fn new(view: WorkerView) -> Self {
+        let missing = view
+            .catalog
+            .as_ref()
+            .map(|catalog| {
+                catalog
+                    .missing
+                    .iter()
+                    .filter_map(|id| catalog.find(id))
+                    .map(|model| MissingModel {
+                        id: model.id.clone(),
+                        zh: model.zh.clone(),
+                        en: model.en.clone(),
+                        size_mb: model.size_mb,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        LocalReport { view, missing }
+    }
+}
+
 /// 每 2 秒把本机识别的状态告诉主程序：识别程序连上之前（等待下载、安装中、出错），控制台也能显示本机的进度。
 /// 控制台点了“开始下载”或“重试”时，主程序在响应里告诉外壳。
 fn report_local_worker(app: AppHandle) {
@@ -408,7 +498,7 @@ fn report_local_worker(app: AppHandle) {
         std::thread::sleep(std::time::Duration::from_secs(2));
         let state = shell(&app);
         let Some((port, token)) = state.server.ready() else { continue };
-        let Ok(body) = serde_json::to_string(&worker_view(&state)) else { continue };
+        let Ok(body) = serde_json::to_string(&LocalReport::new(worker_view(&state))) else { continue };
         let reply = shell_core::process::http_request(
             "PUT",
             port,
@@ -420,7 +510,7 @@ fn report_local_worker(app: AppHandle) {
         let download = matches!(reply, Some((200, ref reply)) if serde_json::from_str::<Reply>(reply).is_ok_and(|r| r.download));
         if download {
             state.logger.info("控制台请求下载本机识别的运行环境和模型");
-            if let Err(error) = set_local_worker(&app, true, true) {
+            if let Err(error) = download_needed(&app) {
                 state.logger.info(&format!("开始下载失败：{error}"));
             }
         }
@@ -579,6 +669,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     create_main(&handle, !autostarted)?;
     prompt_gpu_once(&handle);
     report_local_worker(handle.clone());
+    shell(&handle).worker.watch_models();
     std::thread::spawn(move || server.start(true));
     Ok(())
 }
@@ -602,6 +693,9 @@ fn main() {
             worker_open_logs,
             worker_install_tools,
             worker_download,
+            worker_models_download,
+            worker_model_delete,
+            worker_models_refresh,
             gpu_prompt,
             gpu_choose
         ])

@@ -35,11 +35,11 @@
     const zh = (navigator.language || '').toLowerCase().startsWith('zh')
     const T = zh ? {
       title: '检测到 NVIDIA 显卡', lead: '要用这块显卡识别字幕吗？开启后这台电脑会自动处理识别任务，不用另装显卡电脑。',
-      help: '需要下载运行环境（约 2 GB）和识别模型（约 4 GB），之后不用再下载。只在显卡空闲时接单，不影响打游戏。以后也可以在托盘菜单“本机识别…”里开关。',
+      help: '需要下载运行环境（约 3.6 GB）和当前识别模式需要的模型（默认的 WhisperJAV 双遍约 7.2 GB），之后不用再下载；也可以先开启，稍后在托盘菜单“本机识别…”里选择要下载的模型。只在显卡空闲时接单，不影响打游戏。',
       now: '开启并立即下载', later: '开启，稍后再下载', no: '暂不开启',
     } : {
       title: 'NVIDIA GPU detected', lead: 'Use this GPU to recognize subtitles? This computer then processes recognition jobs itself, no separate GPU PC needed.',
-      help: 'This downloads the program environment (about 2 GB) and models (about 4 GB) once. Jobs are only taken while the GPU is idle. You can change this later under Local recognition… in the tray menu.',
+      help: 'This downloads the program environment (about 3.6 GB) and the models the current recognition mode needs (WhisperJAV two-pass, the default, about 7.2 GB) once; or turn it on now and pick models later under Local recognition… in the tray menu. Jobs are only taken while the GPU is idle.',
       now: 'Turn on and download now', later: 'Turn on, download later', no: 'Not now',
     }
     const { invoke } = window.__TAURI__.core

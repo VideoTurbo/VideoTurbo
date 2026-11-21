@@ -33,6 +33,8 @@ def test_configure_from_connection_code(tmp_path: Path, capsys) -> None:
     assert config["asr"]["download_root"] == "../models"
     # 与桌面、游戏共用显卡的电脑默认只在空闲时接单。
     assert config["idle"]["enabled"] is True
+    # 桌面版：只报告模型已下载的识别模式。
+    assert config["asr"]["local_models_only"] is True
     assert events(capsys.readouterr().out)[-1]["event"] == "configured"
 
 
@@ -63,10 +65,14 @@ def test_install_runs_the_steps_in_order(tmp_path: Path, monkeypatch, capsys) ->
     monkeypatch.setattr(tool.select_sources, "select", lambda names: {"VIDEO_TURBO_PYPI_INDEX_URL": "https://pypi.example/simple"})
     monkeypatch.setattr(tool, "ensure_git", lambda layout, env: None)
 
+    requirements: list[str] = []
+
     def run(command, env):
         commands.append(command)
         assert env["UV_DEFAULT_INDEX"] == "https://pypi.example/simple"
         assert env["PATH"].startswith(str(tmp_path / "ffmpeg") + os.pathsep)
+        if "-r" in command:
+            requirements.append(Path(command[command.index("-r") + 1]).read_text(encoding="utf-8"))
 
     monkeypatch.setattr(tool, "_run", run)
     root = tmp_path / "worker"
@@ -76,6 +82,9 @@ def test_install_runs_the_steps_in_order(tmp_path: Path, monkeypatch, capsys) ->
         ["uv", "venv"], ["uv", "pip"], ["uv", "pip"], [str(tool.Layout.python(root / ".venv")), commands[3][1]],
     ]
     assert "--require-hashes" in commands[1] and "--no-deps" in commands[2]
+    # 不装 faster-whisper 才用的 CUDA 运行库（用 PyTorch 自带的）。
+    assert "faster-whisper==" in requirements[0] and "nvidia-" not in requirements[0]
+    assert not (root / "requirements-asr.txt").exists()
     assert commands[3][-2:] == ["--device", "cpu"]
     output = events(capsys.readouterr().out)
     assert [event["key"] for event in output if event["event"] == "step"] == [
@@ -129,3 +138,37 @@ def test_worker_app_keeps_its_own_config(tmp_path: Path) -> None:
     remote = yaml.safe_load((tmp_path / "config-worker" / "worker.yaml").read_text(encoding="utf-8"))
     assert (local["server_url"], remote["server_url"]) == ("http://127.0.0.1:8766", "http://nas:8766")
     assert remote["asr"]["download_root"] == "../models"
+
+
+def test_cuda_runtime_is_split_out_of_the_locked_requirements() -> None:
+    tool = load_tool()
+    locked = (PROJECT / "deploy" / "worker" / "requirements" / "asr.txt").read_text(encoding="utf-8")
+    base, runtime = tool.split_cuda_runtime(locked)
+    names = [line.split("==")[0] for line in runtime.splitlines() if line and not line[0].isspace()]
+    assert names and all(name.startswith("nvidia-") for name in names)
+    assert {"nvidia-cublas-cu12", "nvidia-cudnn-cu12"} <= set(names)
+    assert "nvidia-" not in base and "faster-whisper==" in base
+    # 每个包都带着自己的 --hash 行，两份合起来就是原来的清单。
+    assert sorted((base + runtime).splitlines()) == sorted(locked.splitlines())
+    assert all("--hash=sha256:" in block for block in tool._requirement_blocks(runtime))
+
+
+def test_runtime_can_be_installed_on_demand(tmp_path: Path, monkeypatch, capsys) -> None:
+    tool = load_tool()
+    root = tmp_path / "worker"
+    assert tool.main(["install-runtime", "--root", str(root), "--bundle", str(PROJECT), "--uv", "uv"]) == 2
+    assert events(capsys.readouterr().out)[-1]["code"] == "not_installed"
+
+    python = tool.Layout.python(root / ".venv")
+    python.parent.mkdir(parents=True)
+    python.write_text("")
+    monkeypatch.setattr(tool.select_sources, "select", lambda names: {})
+    installed: list[str] = []
+
+    def run(command, env):
+        installed.append(Path(command[command.index("-r") + 1]).read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(tool, "_run", run)
+    assert tool.main(["install-runtime", "--root", str(root), "--bundle", str(PROJECT), "--uv", "uv"]) == 0
+    assert "nvidia-cudnn-cu12==" in installed[0] and "faster-whisper" not in installed[0].split("# via")[0]
+    assert events(capsys.readouterr().out)[-1] == {"event": "done"}

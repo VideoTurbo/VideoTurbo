@@ -26,7 +26,9 @@ const machines = computed(() => groupMachines(workers.value, heartbeatTimeout.va
 /** 桌面版：本机识别还没跑起来（等待下载、安装中、出错）时单独显示进度；跑起来后本机出现在列表里。 */
 const localWorker = computed(() => {
   const local = status.value?.local_worker
-  return local && local.phase !== 'running' && local.phase !== 'off' ? local : null
+  if (!local || local.phase === 'off') return null
+  // 识别程序在运行时，只有当前识别模式缺模型才显示。
+  return local.phase !== 'running' || local.missing?.length ? local : null
 })
 /** 没有可创建云主机的平台（含 SSH 机器）时，禁用“创建云主机”。 */
 const canLaunch = computed(() => !!cloud.value?.launch_providers.length)
@@ -35,7 +37,7 @@ const providerCount = computed(() => (cloud.value?.providers_configured ? cloud.
 const summary = computed(() => {
   if (!status.value) return t('common.loading')
   const list = machines.value
-  if (!list.length) return localWorker.value ? t('compute.local.summary') : t('compute.noMachines')
+  if (!list.length) return localWorker.value && localWorker.value.phase !== 'running' ? t('compute.local.summary') : t('compute.noMachines')
   const busy = list.reduce((total, machine) => total + machine.busyCount, 0)
   const restoring = workers.value.filter((w) => w.task_kind === 'restore' && w.current_job_id && workerOnline(w, heartbeatTimeout.value)).length
   return t('compute.summary', { count: list.length, online: list.filter((machine) => machine.onlineCount).length })

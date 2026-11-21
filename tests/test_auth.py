@@ -308,7 +308,11 @@ def test_desktop_shell_reports_local_worker_progress(desktop, monkeypatch: pytes
         assert local.put("/api/auth/desktop/local-worker", json=report, headers=header).json() == {"download": False}
         shown = local.get("/api/status").json()["local_worker"]
         assert shown["phase"] == "installing" and shown["index"] == 2 and shown["download_requested"] is False
-        assert "platform" not in shown
+        assert "platform" not in shown and shown["missing"] == []
+        missing = {**report, "phase": "running", "missing": [{"id": "anime-whisper", "zh": "anime-whisper",
+                                                              "en": "anime-whisper", "size_mb": 2887}]}
+        local.put("/api/auth/desktop/local-worker", json=missing, headers=header)
+        assert local.get("/api/status").json()["local_worker"]["missing"][0]["size_mb"] == 2887
 
         # 控制台点“开始下载”：外壳下次上报时取走，只取一次。
         assert local.post("/api/desktop/local-worker/download").json() == {"requested": True}

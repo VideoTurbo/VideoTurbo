@@ -64,6 +64,14 @@ def claim_job(request: Request, name: str) -> JobClaim | None:
     return worker_service.claim_asr_job(app_state(request), name)
 
 
+@router.get("/api/worker/asr-settings", dependencies=[Depends(require_worker)])
+def worker_asr_settings(request: Request) -> dict:
+    """当前识别模式：桌面版识别机据此决定默认下载哪些模型、提示缺哪些模型。"""
+    state = app_state(request)
+    settings = state.database.asr_settings(state.config.asr)
+    return {"mode": settings.mode, "whisperjav_ensemble": settings.mode == "whisperjav" and settings.whisperjav_ensemble}
+
+
 @router.get("/api/worker/plugins/{plugin_sha256}", dependencies=[Depends(require_worker)])
 def download_worker_plugin(request: Request, plugin_sha256: str) -> Response:
     """GPU 机器按文件指纹下载媒体库来源插件的源码（领取网盘影片的字幕任务时使用）。"""

@@ -1,7 +1,8 @@
 """桌面版的本机识别状态：外壳定时上报，控制台在识别程序连上之前也能看到本机在做什么。
 
 本机识别开启后要先下载运行环境、下载模型并自检，识别程序启动后才会报到、出现在“已接入的机器”里；
-这之前（等待下载、安装中、出错）只有外壳知道进度。外壳每隔几秒把状态 ``PUT`` 到
+这之前（等待下载、安装中、下载模型、出错）只有外壳知道进度。识别程序运行后，如果控制台换了识别模式、
+本机缺新模式的模型，也在这里提示。外壳每隔几秒把状态 ``PUT`` 到
 ``/api/auth/desktop/local-worker``（只接受本机请求和这次启动的令牌），状态放在内存里，
 一段时间没有上报就不再显示。控制台点“开始下载”或“重试”时记下请求，外壳下次上报时从响应里取走。
 """
@@ -23,6 +24,15 @@ FRESH_SECONDS = 15.0
 router = APIRouter()
 
 
+class MissingModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(max_length=64)
+    zh: str = Field(default="", max_length=100)
+    en: str = Field(default="", max_length=100)
+    size_mb: int | None = Field(default=None, ge=0)
+
+
 class LocalWorkerReport(BaseModel):
     """外壳上报的本机识别状态，字段与外壳的识别状态窗口一致。"""
 
@@ -41,6 +51,11 @@ class LocalWorkerReport(BaseModel):
     line: str = Field(default="", max_length=500)
     # 出错时的说明。
     message: str = Field(default="", max_length=1000)
+    # 下载模型：已下载 / 共多少 MB。
+    done_mb: int | None = Field(default=None, ge=0)
+    total_mb: int | None = Field(default=None, ge=0)
+    # 当前识别模式需要、还没下载的模型（识别程序已在运行时也会显示）。
+    missing: list[MissingModel] = Field(default_factory=list, max_length=10)
 
 
 class LocalWorkerStatus:

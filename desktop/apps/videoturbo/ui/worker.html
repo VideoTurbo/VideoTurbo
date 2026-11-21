@@ -26,6 +26,20 @@
           background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 8px 0 0; }
     .warn { color: var(--bad); font-size: 12.5px; margin: 8px 0 0; }
     footer { display: flex; gap: 8px; justify-content: flex-end; }
+    .models-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .models-head h3 { font-size: 14px; margin: 0; }
+    .models-mode { font-size: 12px; color: var(--muted); }
+    .model-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+    .model-row:first-child { border-top: 0; }
+    .model-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .model-text small { color: var(--muted); font-size: 11.5px; }
+    .model-size { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .model-done { color: var(--good, #2f9e44); font-size: 12px; white-space: nowrap; }
+    .model-remove { padding: 2px 8px; font-size: 12px; }
+    .tag { font-size: 11px; padding: 1px 6px; border-radius: 5px; background: var(--accent); color: #fff; white-space: nowrap; }
+    .models-rows { margin-top: 6px; }
+    .models-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+    .models-note { font-size: 12px; color: var(--muted); flex: 1; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -57,6 +71,7 @@
       <p class="help" id="hint"></p>
       <pre id="detail" hidden></pre>
     </section>
+    <section id="models" hidden></section>
     <footer>
       <button class="primary" id="download" hidden></button>
       <button id="tools" hidden></button>
@@ -64,24 +79,25 @@
       <button id="logs"></button>
     </footer>
   </main>
+  <script src="models.js"></script>
   <script>
     const zh = (navigator.language || '').toLowerCase().startsWith('zh')
     const T = zh ? {
-      title: '本机识别', help: '让这台电脑也处理语音识别任务。第一次开启时会下载运行环境（约 2 GB）和识别模型（约 4 GB），之后不用再下载。与桌面、游戏共用显卡时，只在显卡空闲时接单。',
+      title: '本机识别', help: '让这台电脑也处理语音识别任务。第一次开启时会下载运行环境和当前识别模式需要的模型，之后不用再下载。与桌面、游戏共用显卡时，只在显卡空闲时接单。',
       noGpu: '没有检测到 NVIDIA 显卡，识别会用 CPU，速度很慢。', macCpu: 'Mac 上识别使用 CPU，速度比 NVIDIA 显卡慢很多。',
-      off: '未开启', waiting: '正在连接主程序…', installing: '正在安装运行环境', selfTest: '正在下载识别模型并自检（第一次需要较长时间）',
-      running: '运行中：有识别任务时会自动处理', failed: '出错了', conflict: '这台电脑上的 VideoTurbo Worker 正在使用显卡，它停下后会自动接手', needTools: '需要先安装 Apple 的命令行开发工具（含 Git）',
+      off: '未开启', waiting: '正在连接主程序…', installing: '正在安装运行环境', selfTest: '正在自检已下载的模型',
+      running: '运行中：有识别任务时会自动处理', models: '正在下载模型', failed: '出错了', conflict: '这台电脑上的 VideoTurbo Worker 正在使用显卡，它停下后会自动接手', needTools: '需要先安装 Apple 的命令行开发工具（含 Git）',
       needToolsHint: '点“安装命令行工具”，在弹出的窗口里按提示安装，装好后点“重试”。', tools: '安装命令行工具', retry: '重试', logs: '打开日志文件夹',
-      pending: '等待下载', pendingHint: '还没有下载运行环境和识别模型（约 6 GB），下载好之前这台电脑不会接识别任务。方便时点“开始下载”。', download: '开始下载',
-      choose: '开启后需要下载运行环境（约 2 GB）和识别模型（约 4 GB）。现在下载，还是先开启、等方便时再下载？', chooseNow: '立即下载', chooseLater: '稍后下载', cancel: '取消',
+      pending: '等待下载', pendingHint: '还没有下载运行环境或识别模型，下载好之前这台电脑不会接识别任务。方便时点“开始下载”，或在下面的清单里选模型下载。', download: '开始下载',
+      choose: '开启后要下载运行环境（{env}）和当前识别模式需要的模型（默认的 WhisperJAV 双遍约 7.2 GB，单遍约 4.4 GB，faster-whisper 约 2.9 GB）。现在下载，还是先开启、等方便时再下载？', envWin: 'Windows 约 3.6 GB', envMac: '约 1 GB', modelStep: '{name}：{done} / {total}', chooseNow: '立即下载', chooseLater: '稍后下载', cancel: '取消',
     } : {
-      title: 'Local recognition', help: 'Let this computer process speech recognition jobs too. The first time downloads the program environment (about 2 GB) and models (about 4 GB). When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
+      title: 'Local recognition', help: 'Let this computer process speech recognition jobs too. The first time downloads the program environment and the models the current recognition mode needs. When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
       noGpu: 'No NVIDIA GPU detected; recognition will use the CPU and be very slow.', macCpu: 'On a Mac, recognition uses the CPU and is much slower than an NVIDIA GPU.',
-      off: 'Off', waiting: 'Connecting to the main app…', installing: 'Installing the program environment', selfTest: 'Downloading models and running the self-test (the first time takes a while)',
-      running: 'Running: jobs are processed automatically', failed: 'Something went wrong', conflict: 'VideoTurbo Worker on this computer is using the GPU; this takes over when it stops', needTools: "Apple's command line developer tools (including Git) are needed",
+      off: 'Off', waiting: 'Connecting to the main app…', installing: 'Installing the program environment', selfTest: 'Testing the downloaded models',
+      running: 'Running: jobs are processed automatically', models: 'Downloading models', failed: 'Something went wrong', conflict: 'VideoTurbo Worker on this computer is using the GPU; this takes over when it stops', needTools: "Apple's command line developer tools (including Git) are needed",
       needToolsHint: 'Click "Install command line tools", follow the prompts, then click "Retry".', tools: 'Install command line tools', retry: 'Retry', logs: 'Open logs folder',
-      pending: 'Waiting to download', pendingHint: "The program environment and models (about 6 GB) aren't downloaded yet; this computer won't take recognition jobs until they are. Click \"Download now\" when convenient.", download: 'Download now',
-      choose: 'Turning this on downloads the program environment (about 2 GB) and models (about 4 GB). Download now, or turn on and download later?', chooseNow: 'Download now', chooseLater: 'Download later', cancel: 'Cancel',
+      pending: 'Waiting to download', pendingHint: "The program environment or models aren't downloaded yet; this computer won't take recognition jobs until they are. Click \"Download now\" when convenient, or pick models in the list below.", download: 'Download now',
+      choose: 'Turning this on downloads the program environment ({env}) and the models the current recognition mode needs (WhisperJAV two-pass, the default, about 7.2 GB; single-pass about 4.4 GB; faster-whisper about 2.9 GB). Download now, or turn on and download later?', envWin: 'about 3.6 GB on Windows', envMac: 'about 1 GB', modelStep: '{name}: {done} / {total}', chooseNow: 'Download now', chooseLater: 'Download later', cancel: 'Cancel',
     }
     const { invoke } = window.__TAURI__.core
     const $ = (id) => document.getElementById(id)
@@ -91,7 +107,11 @@
     $('retry').textContent = T.retry
     $('logs').textContent = T.logs
     $('download').textContent = T.download
-    $('t-choose').textContent = T.choose
+    const updateModels = window.ModelList($('models'), {
+      download: (ids) => invoke('worker_models_download', { ids }).then(refresh),
+      remove: (id) => invoke('worker_model_delete', { id }).then(refresh),
+    })
+    invoke('worker_models_refresh')
     $('choose-now').textContent = T.chooseNow
     $('choose-later').textContent = T.chooseLater
     $('choose-cancel').textContent = T.cancel
@@ -128,15 +148,24 @@
       const warn = view.platform === 'macos' ? T.macCpu : view.nvidia === false ? T.noGpu : ''
       $('no-gpu').textContent = warn
       $('no-gpu').hidden = !warn || !view.enabled
-      const labels = { off: T.off, waiting: T.waiting, installing: T.installing, self_test: T.selfTest,
+      $('t-choose').textContent = T.choose.replace('{env}', view.platform === 'macos' ? T.envMac : T.envWin)
+      const labels = { off: T.off, waiting: T.waiting, installing: T.installing, models: T.models, self_test: T.selfTest,
                        running: T.running, failed: T.failed, need_tools: T.needTools, conflict: T.conflict, pending: T.pending }
       $('state').textContent = labels[view.phase] || view.phase
       const installing = view.phase === 'installing'
-      $('progress').hidden = !installing
+      const downloading = view.phase === 'models'
+      $('progress').hidden = !installing && !downloading
       if (installing) {
         $('bar').style.width = `${Math.round(((view.index - 1) / Math.max(view.total, 1)) * 100)}%`
         $('step').textContent = `${view.index}/${view.total} ${zh ? view.zh : view.en}`
       }
+      if (downloading) {
+        const mb = (value) => (value >= 1024 ? `${(value / 1024).toFixed(1)} GB` : `${value} MB`)
+        $('bar').style.width = `${Math.round((view.done_mb / Math.max(view.total_mb, 1)) * 100)}%`
+        const name = `${view.index}/${view.total} ${zh ? view.zh : view.en}`
+        $('step').textContent = T.modelStep.replace('{name}', name).replace('{done}', mb(view.done_mb)).replace('{total}', mb(view.total_mb))
+      }
+      updateModels(view.catalog || null, ['waiting', 'installing', 'models', 'self_test'].includes(view.phase))
       $('line').textContent = view.line || ''
       $('hint').textContent = view.phase === 'need_tools' ? T.needToolsHint : view.phase === 'pending' ? T.pendingHint
         : view.phase === 'failed' ? view.message : ''
