@@ -360,7 +360,10 @@ struct WorkerView {
 
 #[tauri::command]
 fn worker_state(app: AppHandle) -> WorkerView {
-    let state = shell(&app);
+    worker_view(&shell(&app))
+}
+
+fn worker_view(state: &Shell) -> WorkerView {
     WorkerView {
         phase: state.worker.phase(),
         enabled: state.server.settings().local_worker,
@@ -392,6 +395,36 @@ fn set_local_worker(app: &AppHandle, enabled: bool, download: bool) -> Result<()
         std::thread::spawn(move || worker.stop());
     }
     Ok(())
+}
+
+/// 每 2 秒把本机识别的状态告诉主程序：识别程序连上之前（等待下载、安装中、出错），控制台也能显示本机的进度。
+/// 控制台点了“开始下载”或“重试”时，主程序在响应里告诉外壳。
+fn report_local_worker(app: AppHandle) {
+    #[derive(Deserialize)]
+    struct Reply {
+        download: bool,
+    }
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let state = shell(&app);
+        let Some((port, token)) = state.server.ready() else { continue };
+        let Ok(body) = serde_json::to_string(&worker_view(&state)) else { continue };
+        let reply = shell_core::process::http_request(
+            "PUT",
+            port,
+            "/api/auth/desktop/local-worker",
+            &[("X-VideoTurbo-Desktop-Token", &token)],
+            Some(&body),
+            std::time::Duration::from_secs(5),
+        );
+        let download = matches!(reply, Some((200, ref reply)) if serde_json::from_str::<Reply>(reply).is_ok_and(|r| r.download));
+        if download {
+            state.logger.info("控制台请求下载本机识别的运行环境和模型");
+            if let Err(error) = set_local_worker(&app, true, true) {
+                state.logger.info(&format!("开始下载失败：{error}"));
+            }
+        }
+    });
 }
 
 /// “待下载”时点“开始下载”。
@@ -545,6 +578,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let autostarted = std::env::args().any(|arg| arg == AUTOSTART_ARG);
     create_main(&handle, !autostarted)?;
     prompt_gpu_once(&handle);
+    report_local_worker(handle.clone());
     std::thread::spawn(move || server.start(true));
     Ok(())
 }

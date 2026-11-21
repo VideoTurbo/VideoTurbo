@@ -71,6 +71,7 @@ PUBLIC_PATHS = frozenset(
         "/api/auth/logout",
         "/api/auth/desktop",
         "/api/auth/desktop/worker",
+        "/api/auth/desktop/local-worker",
     }
 )
 

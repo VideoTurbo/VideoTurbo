@@ -44,6 +44,7 @@ MESSAGES: dict[str, str] = {
     "api.launchNotFound": "The start job doesn't exist.",
     "api.compute.machineNotFound": "The machine doesn't exist or was deleted.",
     "api.compute.machineOnline": "This machine is still online; stop it before deleting.",
+    "api.compute.localWorkerUnavailable": "No status from local recognition yet. Use \"Local recognition…\" in the tray menu instead.",
     "api.compute.machineBusy": "This machine still has recognition or restoration jobs running, so it can't be deleted yet.",
     "api.compute.unknownProvider": "Unknown cloud platform.",
     "api.compute.unknownType": "Unknown connection mode.",

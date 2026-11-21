@@ -291,3 +291,50 @@ def test_desktop_shell_can_fetch_worker_token(desktop) -> None:
         assert response.json() == {"worker_token": "worker-secret", "worker_port": 8766}
     with desktop("192.168.1.20") as remote:
         assert remote.get("/api/auth/desktop/worker", headers=header).status_code == 403
+
+
+def test_desktop_shell_reports_local_worker_progress(desktop, monkeypatch: pytest.MonkeyPatch) -> None:
+    from video_turbo.orchestrator import local_worker
+
+    header = {auth.DESKTOP_TOKEN_HEADER: "shell-token"}
+    report = {"phase": "installing", "enabled": True, "ready": False, "index": 2, "total": 5,
+              "zh": "下载 Python", "en": "Downloading Python", "line": "", "platform": "windows"}
+    with desktop("127.0.0.1") as local:
+        local.get("/api/auth/desktop", params={"token": "shell-token"})
+        assert local.get("/api/status").json()["local_worker"] is None
+        # 控制台在收到上报之前不能请求下载。
+        assert local.post("/api/desktop/local-worker/download").status_code == 409
+        assert local.put("/api/auth/desktop/local-worker", json=report).status_code == 403
+        assert local.put("/api/auth/desktop/local-worker", json=report, headers=header).json() == {"download": False}
+        shown = local.get("/api/status").json()["local_worker"]
+        assert shown["phase"] == "installing" and shown["index"] == 2 and shown["download_requested"] is False
+        assert "platform" not in shown
+
+        # 控制台点“开始下载”：外壳下次上报时取走，只取一次。
+        assert local.post("/api/desktop/local-worker/download").json() == {"requested": True}
+        assert local.get("/api/status").json()["local_worker"]["download_requested"] is True
+        assert local.put("/api/auth/desktop/local-worker", json=report, headers=header).json() == {"download": True}
+        assert local.put("/api/auth/desktop/local-worker", json=report, headers=header).json() == {"download": False}
+
+        # 关闭本机识别或外壳不再上报时不显示。
+        local.put("/api/auth/desktop/local-worker", json={**report, "enabled": False}, headers=header)
+        assert local.get("/api/status").json()["local_worker"] is None
+        local.put("/api/auth/desktop/local-worker", json=report, headers=header)
+        monkeypatch.setattr(local_worker, "FRESH_SECONDS", -1.0)
+        assert local.get("/api/status").json()["local_worker"] is None
+    with desktop("192.168.1.20") as remote:
+        assert remote.put("/api/auth/desktop/local-worker", json=report, headers=header).status_code == 403
+
+
+def test_local_worker_reports_stay_out_of_the_access_log() -> None:
+    import logging
+
+    from video_turbo.orchestrator.app import _QuietAccessLog
+
+    def record(path: str) -> logging.LogRecord:
+        return logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                                 ("127.0.0.1:5000", "PUT", path, "1.0", 200), None)
+
+    quiet = _QuietAccessLog()
+    assert quiet.filter(record("/api/auth/desktop/local-worker")) is False
+    assert quiet.filter(record("/api/status")) is True

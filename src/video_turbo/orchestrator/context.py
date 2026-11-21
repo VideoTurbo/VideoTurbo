@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from .cloud_service import CloudService
     from .cloud_tunnel import TunnelManager
     from .integrations import MediaRefresher, NoticeService
+    from .local_worker import LocalWorkerStatus
     from .poster_service import PosterService
     from .processor import Orchestrator
     from .rate_limit import RateLimiter
@@ -62,6 +63,8 @@ class AppState(Protocol):
     cloud: CloudService
     cloud_tunnels: TunnelManager
     cloud_launcher: CloudLauncher
+    # 桌面版外壳上报的本机识别状态。
+    local_worker: LocalWorkerStatus
     upload_locks: ChunkLocks
     posters: PosterService
     upload_limiter: RateLimiter

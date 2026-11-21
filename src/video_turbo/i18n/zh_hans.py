@@ -44,6 +44,7 @@ MESSAGES: dict[str, str] = {
     "api.launchNotFound": "开机任务不存在。",
     "api.compute.machineNotFound": "机器不存在或已被删除。",
     "api.compute.machineOnline": "这台机器仍在线，请先停止再删除。",
+    "api.compute.localWorkerUnavailable": "没有收到本机识别的状态，请从托盘菜单“本机识别…”里操作。",
     "api.compute.machineBusy": "这台机器仍有正在执行的识别或影片修复任务，暂时不能删除。",
     "api.compute.unknownProvider": "未知的云平台。",
     "api.compute.unknownType": "未知的接入模式。",

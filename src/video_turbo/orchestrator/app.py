@@ -40,6 +40,8 @@ from .i18n_middleware import I18nMiddleware
 from .integrations import MediaRefresher, NoticeService
 from .jobs_api import router as jobs_router
 from .libraries_api import router as libraries_router
+from .local_worker import LocalWorkerStatus
+from .local_worker import router as local_worker_router
 from .log_files import close_log_file, install_log_file
 from .plugins_api import router as plugins_router
 from .poster_service import PosterService
@@ -210,6 +212,7 @@ async def lifespan(app: FastAPI):
         config, database, orchestrator, auto_enabled=live, notices=app.state.notices
     )
     app.state.upload_locks = chunked_upload.ChunkLocks()
+    app.state.local_worker = LocalWorkerStatus()
     app.state.posters = PosterService(
         config, database, orchestrator.thumbnail_dir, orchestrator.sources
     )
@@ -272,6 +275,7 @@ app.include_router(settings_router)
 app.include_router(jobs_router)
 app.include_router(worker_router)
 app.include_router(compute_router)
+app.include_router(local_worker_router)
 app.include_router(restore_router)
 app.add_middleware(AdminAuthMiddleware)
 # 最后添加的在最外层：登录校验的拒绝信息也要翻译。
@@ -331,6 +335,8 @@ async def status(request: Request) -> dict:
         "warnings": config.warnings(),
         "translation": orchestrator.translation_status(),
         "heartbeat_timeout_seconds": config.workers.heartbeat_timeout_seconds,
+        # 桌面版：本机识别在识别程序连上之前的进度（等待下载、安装中、出错）。
+        "local_worker": app_state(request).local_worker.current(),
     }
 
 
@@ -359,6 +365,17 @@ def _watch_stdin(stream, loop: asyncio.AbstractEventLoop, stop: Callable[[], Non
         pass
     logger.info("标准输入已关闭，主程序退出。")
     loop.call_soon_threadsafe(stop)
+
+
+# 桌面版外壳每 2 秒上报本机识别状态：不写访问日志，免得主程序运行期间日志一直变大。
+QUIET_ACCESS_PATHS = frozenset({"/api/auth/desktop/local-worker"})
+
+
+class _QuietAccessLog(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # uvicorn 访问日志的参数：(客户端, 方法, 路径, HTTP 版本, 状态码)
+        args = record.args
+        return not (isinstance(args, tuple) and len(args) >= 3 and args[2] in QUIET_ACCESS_PATHS)
 
 
 async def _serve(server: ServerConfig) -> None:
@@ -391,6 +408,9 @@ async def _serve(server: ServerConfig) -> None:
             )
         ),
     ]
+
+    # uvicorn.Config 会重新配置日志，过滤器在创建之后再加。
+    logging.getLogger("uvicorn.access").addFilter(_QuietAccessLog())
 
     def stop() -> None:
         for item in servers:

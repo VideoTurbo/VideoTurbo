@@ -37,6 +37,7 @@ export const api = {
 
   // Worker
   deleteWorker: (name: string) => del<unknown>(`/api/workers/${seg(name)}`),
+  downloadLocalWorker: () => post<{ requested: boolean }>('/api/desktop/local-worker/download'),
 
   // 影片修复
   restoreStatus: () => get<RestoreStatus>('/api/restore/status'),
