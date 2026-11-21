@@ -7,10 +7,12 @@
 //! - [`connection`]：解析控制台给出的接入串（主程序地址 + 接入密钥）。
 //! - [`worker_env`]：识别程序的运行环境（安装、升级、配置、启动参数）。
 //! - [`worker_manager`]：开启、关闭、守护识别程序，两个应用共用。
+//! - [`models`]：识别模型清单（列出、下载、删除）。
 
 pub mod connection;
 pub mod locale;
 pub mod logfile;
+pub mod models;
 pub mod process;
 pub mod settings;
 pub mod worker_env;

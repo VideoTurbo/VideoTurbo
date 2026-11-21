@@ -16,7 +16,7 @@ use serde::Deserialize;
 use crate::connection::Connection;
 use crate::process::{self, Cancel, Spec};
 
-const PROGRESS: &str = "@@VT ";
+pub(crate) const PROGRESS: &str = "@@VT ";
 /// 官方源（GitHub）下载 Python 失败时依次尝试的镜像。
 const PYTHON_MIRRORS: &[&str] = &["https://registry.npmmirror.com/-/binary/python-build-standalone"];
 
@@ -162,7 +162,7 @@ impl WorkerEnv {
         ]
     }
 
-    fn spec(&self, program: PathBuf, args: Vec<OsString>, extra: &[(&str, &str)]) -> Spec {
+    pub(crate) fn spec(&self, program: PathBuf, args: Vec<OsString>, extra: &[(&str, &str)]) -> Spec {
         let mut env = self.env();
         env.extend(extra.iter().map(|(key, value)| (key.to_string(), OsString::from(value))));
         Spec { program, args, cwd: Some(self.root.clone()), env, output: self.install_log() }
@@ -276,6 +276,24 @@ impl WorkerEnv {
         self.run_script(&python, args, cancel, &mut on_event)
     }
 
+    /// 单独安装 faster-whisper 用的显卡运行库（Windows 上找不到 PyTorch 自带的运行库时）。
+    pub fn install_runtime(
+        &self,
+        cancel: &Cancel,
+        mut on_event: impl FnMut(Event),
+    ) -> Result<(), InstallError> {
+        let args: Vec<OsString> = vec![
+            "install-runtime".into(),
+            "--root".into(),
+            self.root.clone().into(),
+            "--bundle".into(),
+            self.bundle.clone().into(),
+            "--uv".into(),
+            self.uv.clone().into(),
+        ];
+        self.run_script(&self.venv_python(), args, cancel, &mut on_event)
+    }
+
     /// 写入主程序地址和接入密钥。`shared_machine`：新建配置时开启空闲检测（与桌面、游戏共用显卡）。
     pub fn configure(&self, connection: &Connection, shared_machine: bool) -> Result<(), InstallError> {
         let python = self.venv_python();
@@ -331,12 +349,36 @@ impl WorkerEnv {
                 "--config".into(),
                 config,
                 "--self-test".into(),
+                // 只检查已下载模型的识别模式，不下载模型。
+                "--asr-mode".into(),
+                "downloaded".into(),
             ],
             &[],
         );
         spec.output = self.logs().join("self-test.log");
         spec
     }
+}
+
+/// 本机 NVIDIA 显卡的名称（Windows 上用 nvidia-smi 查询）；没有显卡或不是 Windows 时返回 None。
+/// 设置环境变量 VIDEO_TURBO_TEST_GPU_NAME 可以在没有显卡的电脑上试“检测到显卡”的流程。
+pub fn nvidia_gpu_name() -> Option<String> {
+    if let Some(name) = std::env::var("VIDEO_TURBO_TEST_GPU_NAME").ok().filter(|name| !name.is_empty()) {
+        return Some(name);
+    }
+    if has_nvidia() != Some(true) {
+        return None;
+    }
+    let mut command = std::process::Command::new("nvidia-smi");
+    command.args(["--query-gpu=name", "--format=csv,noheader"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command.output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_string)
 }
 
 /// Windows 上是否装了 NVIDIA 驱动（没有时只能用 CPU，很慢）；其他系统返回 None。

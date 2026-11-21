@@ -750,6 +750,28 @@ export interface AuthStatus {
 /** 主控的部署方式：提示文案据此说明设置去哪里改。 */
 export type Deployment = 'docker' | 'desktop' | 'source'
 
+/** 桌面版外壳上报的本机识别状态。 */
+export interface LocalWorker {
+  phase: 'off' | 'pending' | 'waiting' | 'installing' | 'models' | 'self_test' | 'running' | 'conflict' | 'need_tools' | 'failed' | string
+  enabled: boolean
+  ready: boolean
+  /** 安装运行环境：第几步 / 共几步。 */
+  index: number | null
+  total: number | null
+  zh: string
+  en: string
+  /** 安装或自检的最新一行输出。 */
+  line: string
+  message: string
+  /** 下载模型：已下载 / 共多少 MB。 */
+  done_mb: number | null
+  total_mb: number | null
+  /** 当前识别模式需要、还没下载的模型。 */
+  missing: { id: string; zh: string; en: string; size_mb: number | null }[]
+  /** 控制台已请求开始下载，等外壳取走。 */
+  download_requested: boolean
+}
+
 export interface Status {
   /** 主控的 VideoTurbo 版本。 */
   version: string
@@ -762,6 +784,8 @@ export interface Status {
   media_libraries: { id: string; name: string; enabled: boolean }[]
   workers: Worker[]
   heartbeat_timeout_seconds?: number
+  /** 桌面版：本机识别在识别程序连上之前的进度；没开启或已在运行时为 null。 */
+  local_worker?: LocalWorker | null
   asr?: AsrSettings
   translation?: TranslationStatus
   ui?: UiSettings

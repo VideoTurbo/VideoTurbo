@@ -1,7 +1,8 @@
 # 推送版本标签（例如 v1.2.0，必须与 src/video_turbo/__init__.py 的 __version__ 一致）时发布：
 # 1. 运行全部测试；
 # 2. 构建主程序镜像（amd64 + arm64）推送到 ghcr.io/videoturbo/videoturbo；
-# 3. 创建 GitHub Release，附上 GPU 机器安装包和 docker-compose 示例。
+# 3. 构建桌面版安装包（desktop.yml，带更新签名私钥 TAURI_SIGNING_PRIVATE_KEY）；
+# 4. 创建 GitHub Release，附上 Linux 显卡电脑安装包、docker-compose 示例、桌面版安装包和自动更新清单。
 # 标签带“-”（例如 v1.2.0-rc.1）时发布为预发布版本：镜像不更新 latest，Release 标为 Pre-release。
 name: 发布
 
@@ -66,8 +67,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  desktop:
+    needs: test
+    uses: ./.github/workflows/desktop.yml
+    with:
+      release: true
+    secrets: inherit
+
   release:
-    needs: image
+    needs: [image, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -78,6 +86,13 @@ jobs:
           python-version: "3.11"
       - name: 打包服务安装包
         run: python tools/package_release.py --output dist/video-turbo
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: VideoTurbo-*
+          path: artifacts
+      # 改成不含空格的文件名，生成 latest.json / latest-worker.json（已装的桌面版从这里检查更新）。
+      - name: 整理桌面版安装包和更新清单
+        run: python tools/desktop_release.py --artifacts artifacts --tag "${GITHUB_REF_NAME}" --output dist/desktop
       - name: 创建 Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -86,4 +101,5 @@ jobs:
           case "${GITHUB_REF_NAME}" in *-*) flags+=(--prerelease) ;; esac
           gh release create "${GITHUB_REF_NAME}" --verify-tag --generate-notes "${flags[@]}" \
             dist/video-turbo.zip dist/video-turbo.tar.gz \
-            deploy/server/docker-compose.example.yml
+            deploy/server/docker-compose.example.yml \
+            dist/desktop/*

@@ -58,6 +58,7 @@ impl Texts {
         use shell_core::worker_manager::WorkerPhase as P;
         let text = match phase {
             P::Off => self.pick("本机识别：未开启", "Local recognition: off"),
+            P::Pending => self.pick("本机识别：等待下载", "Local recognition: waiting to download"),
             P::Waiting => self.pick("本机识别：正在连接…", "Local recognition: connecting…"),
             P::Installing { index, total, .. } => {
                 return match self.lang {
@@ -68,8 +69,14 @@ impl Texts {
             P::NeedTools => {
                 self.pick("本机识别：需要安装命令行工具", "Local recognition: command line tools needed")
             }
+            P::Models { done_mb, total_mb, .. } => {
+                return match self.lang {
+                    Lang::Zh => format!("本机识别：正在下载模型（{done_mb}/{total_mb} MB）…"),
+                    Lang::En => format!("Local recognition: downloading models ({done_mb}/{total_mb} MB)…"),
+                }
+            }
             P::SelfTest { .. } => {
-                self.pick("本机识别：正在下载模型并自检…", "Local recognition: downloading models…")
+                self.pick("本机识别：正在自检…", "Local recognition: running the self-test…")
             }
             P::Running => self.pick("本机识别：运行中", "Local recognition: running"),
             P::Conflict => self.pick(

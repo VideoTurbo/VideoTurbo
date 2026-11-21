@@ -13,6 +13,14 @@ fn main() {
         "worker_set",
         "worker_open_logs",
         "worker_install_tools",
+        "worker_download",
+        "worker_models_download",
+        "worker_model_delete",
+        "worker_models_refresh",
+        "worker_model_choices",
+        "worker_model_select",
+        "gpu_prompt",
+        "gpu_choose",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(commands)),

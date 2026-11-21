@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-worker-model-choices"
+description = "Enables the worker_model_choices command without any pre-configured scope."
+commands.allow = ["worker_model_choices"]
+
+[[permission]]
+identifier = "deny-worker-model-choices"
+description = "Denies the worker_model_choices command without any pre-configured scope."
+commands.deny = ["worker_model_choices"]

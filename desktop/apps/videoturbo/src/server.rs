@@ -181,13 +181,14 @@ impl Server {
             .then(|| (inner.settings.console_port, inner.token.clone()))
     }
 
-    /// 只改本机识别开关，不重启主程序。
-    pub fn set_local_worker(&self, enabled: bool) -> std::io::Result<()> {
+    /// 改本机识别等外壳自己的开关并保存，不重启主程序。
+    pub fn update_flags(&self, change: impl FnOnce(&mut ServerSettings)) -> std::io::Result<ServerSettings> {
         let mut inner = self.lock();
-        let settings = ServerSettings { local_worker: enabled, ..inner.settings.clone() };
+        let mut settings = inner.settings.clone();
+        change(&mut settings);
         settings.save(&self.paths.settings_file())?;
-        inner.settings = settings;
-        Ok(())
+        inner.settings = settings.clone();
+        Ok(settings)
     }
 
     fn set_phase(&self, inner: &mut Inner, phase: Phase) {

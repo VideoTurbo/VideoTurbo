@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "外壳自己的页面（启动页、设置、本机识别）。控制台是主程序提供的网页，权限另见 console.json。",
-  "windows": ["main", "settings", "worker"],
+  "description": "外壳自己的页面（启动页、设置、本机识别、显卡提示）。控制台是主程序提供的网页，权限另见 console.json。",
+  "windows": ["main", "settings", "worker", "gpu"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
@@ -20,6 +20,14 @@
     "allow-worker-state",
     "allow-worker-set",
     "allow-worker-open-logs",
-    "allow-worker-install-tools"
+    "allow-worker-install-tools",
+    "allow-worker-download",
+    "allow-worker-models-download",
+    "allow-worker-model-delete",
+    "allow-worker-models-refresh",
+    "allow-worker-model-choices",
+    "allow-worker-model-select",
+    "allow-gpu-prompt",
+    "allow-gpu-choose"
   ]
 }

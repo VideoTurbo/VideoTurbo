@@ -226,11 +226,59 @@ pub fn http_ok(port: u16, path: &str, timeout: Duration) -> bool {
 
 /// 本机端口上的 `GET path`，返回状态码和响应体；连不上时返回 None。只用于外壳与主程序之间的小请求。
 pub fn http_get(port: u16, path: &str, headers: &[(&str, &str)], timeout: Duration) -> Option<(u16, String)> {
+    http_request("GET", port, path, headers, None, timeout)
+}
+
+/// 本机端口上的请求；`body` 是 JSON。返回状态码和响应体，连不上时返回 None。
+pub fn http_request(
+    method: &str,
+    port: u16,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<&str>,
+    timeout: Duration,
+) -> Option<(u16, String)> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&address, timeout).ok()?;
     stream.set_read_timeout(Some(timeout)).ok()?;
     stream.set_write_timeout(Some(timeout)).ok()?;
-    let mut request = format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n");
+    let mut request = format!("{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n");
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    if let Some(body) = body {
+        request.push_str(&format!("Content-Type: application/json\r\nContent-Length: {}\r\n", body.len()));
+    }
+    request.push_str("\r\n");
+    request.push_str(body.unwrap_or_default());
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).ok()?;
+    let text = String::from_utf8_lossy(&response);
+    let (head, body) = text.split_once("\r\n\r\n")?;
+    let status = head.split_whitespace().nth(1)?.parse().ok()?;
+    Some((status, body.to_string()))
+}
+
+/// `http://主机:端口/路径` 的 GET（只支持 http），返回状态码和响应体。用于识别机应用连接前读取主程序的识别模式。
+pub fn http_get_url(url: &str, headers: &[(&str, &str)], timeout: Duration) -> Option<(u16, String)> {
+    let rest = url.strip_prefix("http://")?;
+    let (authority, path) = match rest.find('/') {
+        Some(index) => (&rest[..index], &rest[index..]),
+        None => (rest, "/"),
+    };
+    let address =
+        std::net::ToSocketAddrs::to_socket_addrs(&if authority.contains(':') && !authority.ends_with(']') {
+            authority.to_string()
+        } else {
+            format!("{authority}:80")
+        })
+        .ok()?
+        .next()?;
+    let mut stream = TcpStream::connect_timeout(&address, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    let mut request = format!("GET {path} HTTP/1.0\r\nHost: {authority}\r\nConnection: close\r\n");
     for (name, value) in headers {
         request.push_str(&format!("{name}: {value}\r\n"));
     }

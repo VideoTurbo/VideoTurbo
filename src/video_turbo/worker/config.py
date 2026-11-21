@@ -40,6 +40,8 @@ class AsrConfig(WorkerConfigBase):
     chunk_seconds: int = Field(default=300, ge=30, le=1800)
     retry_chunk_seconds: int = Field(default=30, ge=10, le=120)
     download_root: Path = Path("models")
+    # 桌面版开启：只报告模型已下载的识别模式，识别时不联网下载模型（模型由用户在模型清单里下载）。
+    local_models_only: bool = False
 
 
 class WhisperJavConfig(WorkerConfigBase):

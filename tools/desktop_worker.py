@@ -12,6 +12,10 @@
     <root>/mingit               Windows 上按需下载的 Git（安装 WhisperJAV 的依赖要用）
     <root>/state.json           已安装的版本，版本变化时外壳重新安装
 
+识别程序的环境不装 cuBLAS/cuDNN（Windows 上约 1.3 GB，只有 faster-whisper 模式用）：faster-whisper 直接用
+WhisperJAV 环境里 PyTorch 自带的运行库。万一找不到，``install-runtime`` 再单独安装。
+模型不在安装时下载，由外壳按识别模式用 ``video_turbo.worker.model_catalog`` 下载。
+
 进度以 ``@@VT `` 开头的 JSON 行输出到标准输出，其余输出原样写进安装日志。
 """
 
@@ -24,6 +28,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import urllib.request
@@ -47,7 +52,7 @@ STEPS = (
     ("sources", "选择下载源", "Choosing download sources"),
     ("git", "准备 Git", "Preparing Git"),
     ("venv", "创建运行环境", "Creating the program environment"),
-    ("deps", "安装识别组件（第一次要下载显卡运行库，耗时较长）", "Installing recognition components (the first time downloads the GPU runtime and takes a while)"),
+    ("deps", "安装识别组件", "Installing recognition components"),
     ("program", "安装识别程序", "Installing the recognition program"),
     ("backend", "安装默认识别模式（下载 PyTorch，耗时较长）", "Installing the default recognition mode (downloads PyTorch, takes a while)"),
 )
@@ -127,6 +132,39 @@ def ensure_git(layout: Layout, env: dict[str, str]) -> None:
         raise SetupError("need_git", "需要先安装 Git")
 
 
+# 只有 faster-whisper 用的 CUDA 运行库：默认不装，用 PyTorch 自带的。
+CUDA_RUNTIME_PACKAGES = ("nvidia-",)
+
+
+def _requirement_blocks(text: str) -> list[str]:
+    """把锁定的依赖清单拆成块：一个包的一行，加上后面缩进的 --hash 和注释行。"""
+    blocks: list[str] = []
+    for line in text.splitlines(keepends=True):
+        if blocks and line[:1] in {" ", "\t"}:
+            blocks[-1] += line
+        else:
+            blocks.append(line)
+    return blocks
+
+
+def split_cuda_runtime(text: str) -> tuple[str, str]:
+    """返回（不含 CUDA 运行库的清单，只含 CUDA 运行库的清单）。"""
+    keep, runtime = [], []
+    for block in _requirement_blocks(text):
+        (runtime if block.startswith(CUDA_RUNTIME_PACKAGES) else keep).append(block)
+    return "".join(keep), "".join(runtime)
+
+
+def writable_copy(source: Path, target: Path) -> Path:
+    """复制源码目录，并确保副本可写（原目录可能是只读的）。"""
+    shutil.rmtree(target, ignore_errors=True)
+    shutil.copytree(source, target, copy_function=shutil.copyfile,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.egg-info", "build", "dist"))
+    for path in [target, *target.rglob("*")]:
+        path.chmod(path.stat().st_mode | stat.S_IWUSR)
+    return target
+
+
 def _run(command: list[str], env: dict[str, str]) -> None:
     print("$ " + " ".join(command), flush=True)
     subprocess.run(command, env=env, check=True)
@@ -167,12 +205,20 @@ def install(args: argparse.Namespace) -> None:
         _run([str(args.uv), "venv", "--python", str(args.python), "--seed", str(layout.venv)], env)
 
     step(3)
-    requirements = bundle / "deploy" / "worker" / "requirements" / "asr.txt"
+    requirements = layout.root / "requirements-asr.txt"
+    base, _ = split_cuda_runtime((bundle / "deploy" / "worker" / "requirements" / "asr.txt").read_text(encoding="utf-8"))
+    requirements.write_text(base, encoding="utf-8")
     _run([str(args.uv), "pip", "install", "--python", str(python), "--require-hashes", "-r", str(requirements)], env)
+    requirements.unlink(missing_ok=True)
 
     step(4)
-    # 版本号没变时也强制替换，避免继续用旧代码。
-    _run([str(args.uv), "pip", "install", "--python", str(python), "--no-deps", "--reinstall", str(bundle)], env)
+    # 安装包在 C:\Program Files 下是只读的，构建时又要在源码目录里写临时文件，所以先复制到可写的文件夹。
+    source = writable_copy(bundle, layout.root / "build-src")
+    try:
+        # 版本号没变时也强制替换，避免继续用旧代码。
+        _run([str(args.uv), "pip", "install", "--python", str(python), "--no-deps", "--reinstall", str(source)], env)
+    finally:
+        shutil.rmtree(source, ignore_errors=True)
 
     step(5)
     _run([str(python), str(bundle / "tools" / "install_whisperjav.py"), "--venv", str(layout.backend),
@@ -184,6 +230,51 @@ def install(args: argparse.Namespace) -> None:
         encoding="utf-8",
     )
     emit("done", version=version)
+
+
+def _uv_env(args: argparse.Namespace) -> dict[str, str]:
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["UV_NO_CACHE"] = "1"
+    env["UV_LINK_MODE"] = "copy"
+    for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "PIP_CONSTRAINT"):
+        env.pop(key, None)
+    os.environ.update(select_sources.select(["pypi"]))
+    index_url = os.environ.get("VIDEO_TURBO_PYPI_INDEX_URL") or select_sources.SOURCES["pypi"].candidates[0][1]
+    env["UV_DEFAULT_INDEX"] = env["PIP_INDEX_URL"] = index_url
+    return env
+
+
+def install_runtime(args: argparse.Namespace) -> None:
+    """单独安装 faster-whisper 用的 CUDA 运行库（找不到 PyTorch 自带的运行库时）。"""
+    layout = Layout(args.root)
+    python = Layout.python(layout.venv)
+    if not python.is_file():
+        raise SetupError("not_installed", "识别运行环境还没有安装")
+    _, runtime = split_cuda_runtime((args.bundle / "deploy" / "worker" / "requirements" / "asr.txt").read_text(encoding="utf-8"))
+    requirements = layout.root / "requirements-runtime.txt"
+    requirements.write_text(runtime, encoding="utf-8")
+    emit("step", index=1, total=1, key="runtime", zh="安装 faster-whisper 的显卡运行库（约 1.3 GB）",
+         en="Installing the GPU runtime for faster-whisper (about 1.3 GB)")
+    try:
+        _run([str(args.uv), "pip", "install", "--python", str(python), "--require-hashes", "-r", str(requirements)],
+             _uv_env(args))
+    finally:
+        requirements.unlink(missing_ok=True)
+    emit("done")
+
+
+_LOCAL_MODELS = re.compile(r"^([ \t]+local_models_only:)[ \t]*.*$", re.MULTILINE)
+
+
+def enable_local_models(text: str) -> str:
+    """桌面版：只报告模型已下载的识别模式，识别时不联网下载模型。"""
+    if _LOCAL_MODELS.search(text):
+        return _LOCAL_MODELS.sub(lambda match: f"{match.group(1)} true", text, count=1)
+    if re.search(r"^asr:[ \t]*$", text, re.MULTILINE):
+        return re.sub(r"^(asr:[ \t]*)$", lambda match: f"{match.group(1)}\n  local_models_only: true", text,
+                      count=1, flags=re.MULTILINE)
+    return text.rstrip("\n") + "\nasr:\n  local_models_only: true\n"
 
 
 def configure(args: argparse.Namespace) -> None:
@@ -208,6 +299,7 @@ def configure(args: argparse.Namespace) -> None:
     text = configure_worker.write_values(text, values)
     if created and args.shared_machine:
         text = configure_worker.enable_idle_detection(text)
+    text = enable_local_models(text)
     layout.config.parent.mkdir(parents=True, exist_ok=True)
     temporary = layout.config.with_suffix(".yaml.tmp")
     temporary.write_text(text, encoding="utf-8")
@@ -249,6 +341,10 @@ def main(argv: list[str] | None = None) -> int:
     config.add_argument("--token", default="")
     config.add_argument("--models", type=Path, help="模型下载目录")
     config.add_argument("--shared-machine", action="store_true", help="新建配置时开启空闲检测")
+    runtime = commands.add_parser("install-runtime", help="单独安装 faster-whisper 用的 CUDA 运行库")
+    runtime.add_argument("--root", type=Path, required=True)
+    runtime.add_argument("--bundle", type=Path, required=True)
+    runtime.add_argument("--uv", type=Path, required=True)
     state = commands.add_parser("status", help="以 JSON 输出安装和配置状态")
     state.add_argument("--root", type=Path, required=True)
     state.add_argument("--bundle", type=Path)
@@ -257,7 +353,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "configure" and args.server_url and not args.token:
         parser.error("--server-url 需要同时给出 --token")
     try:
-        {"install": install, "configure": configure, "status": status}[args.command](args)
+        {"install": install, "configure": configure, "status": status,
+         "install-runtime": install_runtime}[args.command](args)
     except SetupError as exc:
         emit("error", code=exc.code, message=str(exc))
         return 2

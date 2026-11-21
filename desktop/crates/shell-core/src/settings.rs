@@ -21,6 +21,12 @@ pub struct ServerSettings {
     pub safe_mode: bool,
     /// 本机识别：这台电脑也作为显卡电脑处理识别任务（运行环境第一次开启时下载）。
     pub local_worker: bool,
+    /// 用户同意下载本机识别的运行环境和模型（开启时选了“稍后下载”则为 false，停在“待下载”）。
+    pub local_worker_download: bool,
+    /// 已经问过“检测到显卡，要不要开启本机识别”，不再弹出。
+    pub gpu_prompted: bool,
+    /// 开启本机识别时在下载前选的模型；第一次下载模型时用，之后在模型清单里管理。
+    pub local_worker_models: Vec<String>,
 }
 
 impl Default for ServerSettings {
@@ -32,6 +38,9 @@ impl Default for ServerSettings {
             backup_dir: None,
             safe_mode: false,
             local_worker: false,
+            local_worker_download: false,
+            gpu_prompted: false,
+            local_worker_models: Vec::new(),
         }
     }
 }

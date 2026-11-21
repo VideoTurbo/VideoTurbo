@@ -28,14 +28,17 @@ use tauri_plugin_opener::OpenerExt as _;
 
 use server::{Paths, Phase, Server};
 use shell_core::connection::Connection;
+use shell_core::models::{ModeInfo, ModelStatus};
 use shell_core::worker_env::WorkerEnv;
 use shell_core::worker_manager::{Connect, WorkerManager, WorkerPhase};
+use shell_tauri::updater::{self, UpdateMenu};
 use texts::Texts;
 
 const AUTOSTART_ARG: &str = "--autostart";
 const MAIN: &str = "main";
 const SETTINGS: &str = "settings";
 const WORKER: &str = "worker";
+const GPU: &str = "gpu";
 
 struct Shell {
     server: Arc<Server>,
@@ -45,6 +48,8 @@ struct Shell {
     status_item: MenuItem<Wry>,
     worker_item: MenuItem<Wry>,
     autostart_item: CheckMenuItem<Wry>,
+    update_item: MenuItem<Wry>,
+    updates: Arc<UpdateMenu>,
     /// 控制台选的主题：None 为跟随系统。记在数据文件夹里，下次打开时窗口一出现就是这个颜色。
     theme: Mutex<Option<Theme>>,
     theme_file: PathBuf,
@@ -164,9 +169,36 @@ fn show_worker(app: &AppHandle) {
     let _ = WebviewWindowBuilder::new(app, WORKER, WebviewUrl::App("worker.html".into()))
         .title(title)
         .theme(current_theme(app))
-        .inner_size(600.0, 520.0)
+        .inner_size(620.0, 720.0)
         .resizable(false)
         .build();
+}
+
+/// 第一次打开时检测到 NVIDIA 显卡、本机识别又没开，问一次要不要用它识别字幕。
+fn prompt_gpu_once(app: &AppHandle) {
+    let settings = shell(app).server.settings();
+    if settings.gpu_prompted || settings.local_worker {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if shell_core::worker_env::nvidia_gpu_name().is_none() {
+            return;
+        }
+        // 只问一次：关掉窗口等同“以后再说”，之后在托盘“本机识别…”里开启。
+        let _ = shell(&app).server.update_flags(|settings| settings.gpu_prompted = true);
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let title = shell(&handle).texts.local_worker_title();
+            let _ = WebviewWindowBuilder::new(&handle, GPU, WebviewUrl::App("gpu.html".into()))
+                .title(title)
+                .theme(current_theme(&handle))
+                .inner_size(560.0, 580.0)
+                .resizable(false)
+                .always_on_top(true)
+                .build();
+        });
+    });
 }
 
 fn open_folder(app: &AppHandle, folder: PathBuf) {
@@ -195,6 +227,7 @@ fn build_tray(app: &AppHandle, state: &Shell) -> tauri::Result<()> {
             &worker,
             &settings,
             &state.autostart_item,
+            &state.update_item,
             &PredefinedMenuItem::separator(app)?,
             &data,
             &logs,
@@ -221,6 +254,7 @@ fn build_tray(app: &AppHandle, state: &Shell) -> tauri::Result<()> {
             "open" => show_main(app),
             "settings" => show_settings(app),
             "worker" => show_worker(app),
+            "update" => shell(app).updates.on_click(app.clone()),
             "autostart" => toggle_autostart(app),
             "data" => open_folder(app, shell(app).server.paths().home.clone()),
             "logs" => open_folder(app, shell(app).server.paths().logs()),
@@ -345,8 +379,8 @@ fn save_settings(app: AppHandle, input: SettingsInput) -> Result<(), String> {
             .filter(|dir| !dir.is_empty())
             .map(PathBuf::from),
         safe_mode: input.safe_mode,
-        // 本机识别在它自己的窗口里开关，设置页不改它。
-        local_worker: state.server.settings().local_worker,
+        // 本机识别等开关在别的窗口里改，设置页不动它们。
+        ..state.server.settings()
     };
     settings.validate().map_err(|invalid| state.texts.invalid_settings(&invalid))?;
     if settings == state.server.settings() {
@@ -398,34 +432,269 @@ struct WorkerView {
     #[serde(flatten)]
     phase: WorkerPhase,
     enabled: bool,
+    /// 运行环境和模型都已就绪，开启时不用再下载。
+    ready: bool,
     platform: &'static str,
     /// Windows 上是否检测到 NVIDIA 显卡（没有时只能用 CPU，很慢）；macOS 为 None。
     nvidia: Option<bool>,
+    /// 模型清单（含当前识别模式、缺哪些模型）；运行环境没装好时为 None。
+    catalog: Option<ModelStatus>,
 }
 
 #[tauri::command]
 fn worker_state(app: AppHandle) -> WorkerView {
-    let state = shell(&app);
+    worker_view(&shell(&app))
+}
+
+fn worker_view(state: &Shell) -> WorkerView {
     WorkerView {
         phase: state.worker.phase(),
         enabled: state.server.settings().local_worker,
+        ready: state.worker.ready_to_run(),
         platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
         nvidia: shell_core::worker_env::has_nvidia(),
+        catalog: state.worker.models(),
     }
 }
 
-/// 开启或关闭本机识别；失败后再点开启即重试。
+/// 下载清单里选的模型（会停下识别程序，下载、自检后重新启动）。
 #[tauri::command]
-fn worker_set(app: AppHandle, enabled: bool) -> Result<(), String> {
+fn worker_models_download(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let state = shell(&app);
-    state.server.set_local_worker(enabled).map_err(|error| error.to_string())?;
+    state
+        .server
+        .update_flags(|settings| {
+            settings.local_worker = true;
+            settings.local_worker_download = true;
+        })
+        .map_err(|error| error.to_string())?;
+    state.worker.download_models(Some(local_connection(Arc::clone(&state.server))), ids);
+    Ok(())
+}
+
+#[tauri::command]
+fn worker_model_delete(app: AppHandle, id: String) {
+    let state = shell(&app);
+    let connect = state.server.settings().local_worker.then(|| local_connection(Arc::clone(&state.server)));
+    match connect {
+        Some(connect) => state.worker.delete_model(Some(connect), id),
+        // 本机识别没开启：只删除，不启动。
+        None => {
+            let worker = Arc::clone(&state.worker);
+            std::thread::spawn(move || {
+                let _ = worker.env().delete_model(&id);
+                worker.refresh_models();
+            });
+        }
+    }
+}
+
+/// 改用模型的另一个已下载的版本。
+#[tauri::command]
+fn worker_model_select(app: AppHandle, id: String, value: String) {
+    let state = shell(&app);
+    let connect = state.server.settings().local_worker.then(|| local_connection(Arc::clone(&state.server)));
+    match connect {
+        Some(connect) => state.worker.select_model(Some(connect), id, value),
+        // 本机识别没开启：只改配置。
+        None => {
+            let _ = state.worker.env().select_model(&id, &value);
+            state.worker.refresh_models_later();
+        }
+    }
+}
+
+#[tauri::command]
+fn worker_models_refresh(app: AppHandle) {
+    shell(&app).worker.refresh_models_later();
+}
+
+/// 控制台点了“开始下载”：第一次设置时按“立即下载”开启；已有模型时下载当前识别模式缺的模型。
+fn download_needed(app: &AppHandle) -> Result<(), String> {
+    let state = shell(app);
+    let missing = state.worker.models().filter(|catalog| !catalog.downloaded().is_empty()).map(|c| c.missing);
+    match missing {
+        Some(ids) if !ids.is_empty() => worker_models_download(app.clone(), ids),
+        _ => set_local_worker(app, true, true, None),
+    }
+}
+
+/// 开启或关闭本机识别；失败后再点开启即重试。`download` 为 false 时（稍后下载）停在“待下载”。
+#[tauri::command]
+fn worker_set(
+    app: AppHandle,
+    enabled: bool,
+    download: bool,
+    models: Option<Vec<String>>,
+) -> Result<(), String> {
+    set_local_worker(&app, enabled, download, models)
+}
+
+/// 开启或关闭本机识别。`models` 是下载前选的模型（保存起来，稍后下载时也用它）。
+fn set_local_worker(
+    app: &AppHandle,
+    enabled: bool,
+    download: bool,
+    models: Option<Vec<String>>,
+) -> Result<(), String> {
+    let state = shell(app);
+    let settings = state
+        .server
+        .update_flags(|settings| {
+            settings.local_worker = enabled;
+            settings.local_worker_download |= enabled && download;
+            if let Some(models) = models {
+                settings.local_worker_models = models;
+            }
+        })
+        .map_err(|error| error.to_string())?;
     if enabled {
-        state.worker.start(Some(local_connection(Arc::clone(&state.server))));
+        start_local_worker(&state, &settings);
     } else {
         let worker = Arc::clone(&state.worker);
         std::thread::spawn(move || worker.stop());
     }
     Ok(())
+}
+
+/// 上报给主程序的本机识别状态：窗口用的状态，加上当前识别模式缺的模型（名称和大小）。
+#[derive(Serialize)]
+struct LocalReport {
+    #[serde(flatten)]
+    view: WorkerView,
+    missing: Vec<MissingModel>,
+}
+
+#[derive(Serialize)]
+struct MissingModel {
+    id: String,
+    zh: String,
+    en: String,
+    size_mb: Option<u64>,
+}
+
+impl LocalReport {
+    fn new(view: WorkerView) -> Self {
+        let missing = view
+            .catalog
+            .as_ref()
+            .map(|catalog| {
+                catalog
+                    .missing
+                    .iter()
+                    .filter_map(|id| catalog.find(id))
+                    .map(|model| MissingModel {
+                        id: model.id.clone(),
+                        zh: model.zh.clone(),
+                        en: model.en.clone(),
+                        size_mb: model.size_mb,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        LocalReport { view, missing }
+    }
+}
+
+/// 每 2 秒把本机识别的状态告诉主程序：识别程序连上之前（等待下载、安装中、出错），控制台也能显示本机的进度。
+/// 控制台点了“开始下载”或“重试”时，主程序在响应里告诉外壳。
+fn report_local_worker(app: AppHandle) {
+    #[derive(Deserialize)]
+    struct Reply {
+        download: bool,
+    }
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let state = shell(&app);
+        let Some((port, token)) = state.server.ready() else { continue };
+        let Ok(body) = serde_json::to_string(&LocalReport::new(worker_view(&state))) else { continue };
+        let reply = shell_core::process::http_request(
+            "PUT",
+            port,
+            "/api/auth/desktop/local-worker",
+            &[("X-VideoTurbo-Desktop-Token", &token)],
+            Some(&body),
+            std::time::Duration::from_secs(5),
+        );
+        let download = matches!(reply, Some((200, ref reply)) if serde_json::from_str::<Reply>(reply).is_ok_and(|r| r.download));
+        if download {
+            state.logger.info("控制台请求下载本机识别的运行环境和模型");
+            if let Err(error) = download_needed(&app) {
+                state.logger.info(&format!("开始下载失败：{error}"));
+            }
+        }
+    });
+}
+
+/// 按设置启动本机识别。还没下载过模型时，下载开启前选的模型（没选过就按当前识别模式）。
+fn start_local_worker(state: &Shell, settings: &ServerSettings) {
+    let chosen = (!state.worker.has_models() && !settings.local_worker_models.is_empty())
+        .then(|| settings.local_worker_models.clone());
+    state.worker.start_with(
+        Some(local_connection(Arc::clone(&state.server))),
+        settings.local_worker_download,
+        chosen,
+    );
+}
+
+/// 主程序的当前识别模式（开启本机识别前勾选默认要下载的模型）。
+fn local_mode(server: &Server) -> Option<ModeInfo> {
+    #[derive(Deserialize)]
+    struct Access {
+        asr_mode: String,
+        whisperjav_ensemble: bool,
+    }
+    let (port, token) = server.ready()?;
+    let reply = shell_core::process::http_get(
+        port,
+        "/api/auth/desktop/worker",
+        &[("X-VideoTurbo-Desktop-Token", &token)],
+        std::time::Duration::from_secs(5),
+    );
+    let Some((200, body)) = reply else { return None };
+    let access: Access = serde_json::from_str(&body).ok()?;
+    Some(ModeInfo { mode: access.asr_mode, whisperjav_ensemble: access.whisperjav_ensemble, live: true })
+}
+
+/// 让用户选模型的清单：运行环境装好后是实际清单，之前是按当前识别模式勾选的默认清单。
+#[tauri::command]
+fn worker_model_choices(app: AppHandle) -> ModelStatus {
+    let state = shell(&app);
+    state.worker.choices(|| local_mode(&state.server))
+}
+
+/// “待下载”时点“开始下载”。
+#[tauri::command]
+fn worker_download(app: AppHandle) -> Result<(), String> {
+    set_local_worker(&app, true, true, None)
+}
+
+#[derive(Serialize)]
+struct GpuPrompt {
+    name: Option<String>,
+    catalog: ModelStatus,
+}
+
+#[tauri::command]
+fn gpu_prompt(app: AppHandle) -> GpuPrompt {
+    let state = shell(&app);
+    GpuPrompt {
+        name: shell_core::worker_env::nvidia_gpu_name(),
+        catalog: state.worker.choices(|| local_mode(&state.server)),
+    }
+}
+
+/// 检测到显卡时的选择：now 开启并立即下载，later 开启但稍后下载，no 不开启。
+#[tauri::command]
+fn gpu_choose(app: AppHandle, choice: String, models: Option<Vec<String>>) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(GPU) {
+        let _ = window.destroy();
+    }
+    match choice.as_str() {
+        "now" => set_local_worker(&app, true, true, models),
+        "later" => set_local_worker(&app, true, false, models),
+        _ => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -488,8 +757,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 let handle = handle.clone();
                 std::thread::spawn(move || {
                     if let Some(state) = handle.try_state::<Shell>() {
-                        if state.server.settings().local_worker {
-                            state.worker.start(Some(local_connection(Arc::clone(&state.server))));
+                        let settings = state.server.settings();
+                        if settings.local_worker {
+                            start_local_worker(&state, &settings);
                         }
                     }
                 });
@@ -513,6 +783,22 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     };
     let worker = WorkerManager::new(worker_env, Arc::clone(&logger), worker_notify);
     let server = Server::new(paths, settings, Arc::clone(&texts), Arc::clone(&logger), notify);
+    let update_item = MenuItem::with_id(app, "update", updater::check_label(texts.lang), true, None::<&str>)?;
+    let updates = {
+        let (server, worker, log) = (Arc::clone(&server), Arc::clone(&worker), Arc::clone(&logger));
+        let log2 = Arc::clone(&logger);
+        UpdateMenu::new(
+            update_item.clone(),
+            texts.lang,
+            Box::new(move || {
+                log.info("安装更新前停止识别程序和主程序");
+                worker.stop();
+                server.shutdown();
+            }),
+            Box::new(move |message| log2.info(message)),
+        )
+    };
+    updates.start_background_checks(handle.clone());
     let state = Shell {
         server: Arc::clone(&server),
         worker,
@@ -521,6 +807,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         status_item,
         worker_item,
         autostart_item,
+        update_item,
+        updates,
         theme,
         theme_file,
     };
@@ -530,6 +818,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // 主窗口始终存在（自启时隐藏），这样关闭设置窗口不会被当成“最后一个窗口关闭”而退出。
     let autostarted = std::env::args().any(|arg| arg == AUTOSTART_ARG);
     create_main(&handle, !autostarted)?;
+    prompt_gpu_once(&handle);
+    report_local_worker(handle.clone());
+    shell(&handle).worker.watch_models();
     std::thread::spawn(move || server.start(true));
     Ok(())
 }
@@ -541,6 +832,7 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(updater::plugin())
         .invoke_handler(tauri::generate_handler![
             set_theme,
             server_state,
@@ -551,7 +843,15 @@ fn main() {
             worker_state,
             worker_set,
             worker_open_logs,
-            worker_install_tools
+            worker_install_tools,
+            worker_download,
+            worker_models_download,
+            worker_model_delete,
+            worker_models_refresh,
+            worker_model_choices,
+            worker_model_select,
+            gpu_prompt,
+            gpu_choose
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

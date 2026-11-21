@@ -71,6 +71,7 @@ PUBLIC_PATHS = frozenset(
         "/api/auth/logout",
         "/api/auth/desktop",
         "/api/auth/desktop/worker",
+        "/api/auth/desktop/local-worker",
     }
 )
 
@@ -369,7 +370,14 @@ async def desktop_worker(request: Request) -> dict:
     if _client(request) not in LOOPBACK or not auth.check_desktop_token(request.headers.get(DESKTOP_TOKEN_HEADER, "")):
         raise HTTPException(status_code=403, detail=msg("auth.desktopTokenInvalid"))
     state = app_state(request)
-    return {"worker_token": state.worker_token, "worker_port": state.config.server.worker_port}
+    asr = state.database.asr_settings(state.config.asr)
+    return {
+        "worker_token": state.worker_token,
+        "worker_port": state.config.server.worker_port,
+        # 开启本机识别前，外壳按当前识别模式勾选要下载的模型。
+        "asr_mode": asr.mode,
+        "whisperjav_ensemble": asr.mode == "whisperjav" and asr.whisperjav_ensemble,
+    }
 
 
 @router.get("/login", response_class=HTMLResponse, include_in_schema=False)
