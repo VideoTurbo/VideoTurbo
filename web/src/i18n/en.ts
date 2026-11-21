@@ -397,6 +397,7 @@ const en: Messages = {
   'compute.addWorker.title': "Add a GPU computer",
   'compute.addWorker.step1': "Install and open VideoTurbo Worker on a Windows computer with an NVIDIA GPU.",
   'compute.addWorker.step2': "When it first opens, paste the connection code below and it connects to the main app.",
+  'compute.addWorker.localHint': "If the computer running the main app has an NVIDIA GPU, you don't need this: turn on Local recognition… in the tray menu.",
   'compute.addWorker.address': "Connection address",
   'compute.addWorker.addressPlaceholder': "e.g. http://192.168.1.10:8766",
   'compute.addWorker.addressHelp': "The GPU computer must be able to reach this address. Outside your local network, use a public address or domain and open only this port on your router.",

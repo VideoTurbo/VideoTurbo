@@ -58,6 +58,7 @@ impl Texts {
         use shell_core::worker_manager::WorkerPhase as P;
         let text = match phase {
             P::Off => self.pick("本机识别：未开启", "Local recognition: off"),
+            P::Pending => self.pick("本机识别：等待下载", "Local recognition: waiting to download"),
             P::Waiting => self.pick("本机识别：正在连接…", "Local recognition: connecting…"),
             P::Installing { index, total, .. } => {
                 return match self.lang {

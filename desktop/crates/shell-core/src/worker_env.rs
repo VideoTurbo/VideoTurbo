@@ -339,6 +339,27 @@ impl WorkerEnv {
     }
 }
 
+/// 本机 NVIDIA 显卡的名称（Windows 上用 nvidia-smi 查询）；没有显卡或不是 Windows 时返回 None。
+/// 设置环境变量 VIDEO_TURBO_TEST_GPU_NAME 可以在没有显卡的电脑上试“检测到显卡”的流程。
+pub fn nvidia_gpu_name() -> Option<String> {
+    if let Some(name) = std::env::var("VIDEO_TURBO_TEST_GPU_NAME").ok().filter(|name| !name.is_empty()) {
+        return Some(name);
+    }
+    if has_nvidia() != Some(true) {
+        return None;
+    }
+    let mut command = std::process::Command::new("nvidia-smi");
+    command.args(["--query-gpu=name", "--format=csv,noheader"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command.output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_string)
+}
+
 /// Windows 上是否装了 NVIDIA 驱动（没有时只能用 CPU，很慢）；其他系统返回 None。
 pub fn has_nvidia() -> Option<bool> {
     if !cfg!(windows) {

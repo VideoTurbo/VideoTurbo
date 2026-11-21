@@ -27,6 +27,8 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(2);
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum WorkerPhase {
     Off,
+    /// 已开启，但用户选了“稍后下载”：运行环境或模型还没下载，点“开始下载”后继续。
+    Pending,
     /// 等接入信息（例如主程序还没就绪）。
     Waiting,
     Installing {
@@ -126,8 +128,26 @@ impl WorkerManager {
         self.lock().generation == generation
     }
 
+    /// 运行环境装好、模型也下载并自检过，开启后不用再下载任何东西。
+    pub fn ready_to_run(&self) -> bool {
+        !self.env.needs_install() && self.self_test_passed()
+    }
+
+    fn self_test_marker(&self) -> PathBuf {
+        self.env.root.join("self-test.ok")
+    }
+
+    fn self_test_passed(&self) -> bool {
+        let version = self.env.installed_version().unwrap_or_default();
+        !version.is_empty()
+            && std::fs::read_to_string(self.self_test_marker())
+                .map(|text| text.trim() == version)
+                .unwrap_or(false)
+    }
+
     /// 开启（或按新的接入信息重新开始）。`connect` 为 None 时沿用已写好的配置。
-    pub fn start(self: &Arc<Self>, connect: Option<Connect>) {
+    /// `allow_download` 为 false 时，还要下载运行环境或模型就停在“待下载”（用户选了稍后下载）。
+    pub fn start(self: &Arc<Self>, connect: Option<Connect>, allow_download: bool) {
         let (generation, previous, cancel) = {
             let mut inner = self.lock();
             inner.generation += 1;
@@ -141,7 +161,7 @@ impl WorkerManager {
         }
         self.set(generation, WorkerPhase::Waiting);
         let manager = Arc::clone(self);
-        thread::spawn(move || manager.run(generation, connect, cancel));
+        thread::spawn(move || manager.run(generation, connect, cancel, allow_download));
     }
 
     /// 关闭：停止识别程序和正在进行的安装。运行环境留着，下次开启不用重装。
@@ -161,7 +181,17 @@ impl WorkerManager {
         }
     }
 
-    fn run(self: Arc<Self>, generation: u64, connect: Option<Connect>, cancel: Arc<Cancel>) {
+    fn run(
+        self: Arc<Self>,
+        generation: u64,
+        connect: Option<Connect>,
+        cancel: Arc<Cancel>,
+        allow_download: bool,
+    ) {
+        if !allow_download && !self.ready_to_run() {
+            self.set(generation, WorkerPhase::Pending);
+            return;
+        }
         let connection = match connect {
             Some(connect) => {
                 let alive = || self.current(generation);
@@ -226,9 +256,9 @@ impl WorkerManager {
 
     /// 第一次运行前自检（提前下载模型）；同一版本通过过就跳过。
     fn self_test(&self, generation: u64, cancel: &Cancel) -> bool {
-        let marker = self.env.root.join("self-test.ok");
+        let marker = self.self_test_marker();
         let version = self.env.installed_version().unwrap_or_default();
-        if std::fs::read_to_string(&marker).map(|text| text.trim() == version).unwrap_or(false) {
+        if self.self_test_passed() {
             return true;
         }
         self.logger.info("首次运行前自检");

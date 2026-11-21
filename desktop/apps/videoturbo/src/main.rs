@@ -34,6 +34,7 @@ const AUTOSTART_ARG: &str = "--autostart";
 const MAIN: &str = "main";
 const SETTINGS: &str = "settings";
 const WORKER: &str = "worker";
+const GPU: &str = "gpu";
 
 struct Shell {
     server: Arc<Server>,
@@ -120,6 +121,32 @@ fn show_worker(app: &AppHandle) {
         .inner_size(600.0, 520.0)
         .resizable(false)
         .build();
+}
+
+/// 第一次打开时检测到 NVIDIA 显卡、本机识别又没开，问一次要不要用它识别字幕。
+fn prompt_gpu_once(app: &AppHandle) {
+    let settings = shell(app).server.settings();
+    if settings.gpu_prompted || settings.local_worker {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if shell_core::worker_env::nvidia_gpu_name().is_none() {
+            return;
+        }
+        // 只问一次：关掉窗口等同“以后再说”，之后在托盘“本机识别…”里开启。
+        let _ = shell(&app).server.update_flags(|settings| settings.gpu_prompted = true);
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let title = shell(&handle).texts.local_worker_title();
+            let _ = WebviewWindowBuilder::new(&handle, GPU, WebviewUrl::App("gpu.html".into()))
+                .title(title)
+                .inner_size(480.0, 400.0)
+                .resizable(false)
+                .always_on_top(true)
+                .build();
+        });
+    });
 }
 
 fn open_folder(app: &AppHandle, folder: PathBuf) {
@@ -271,8 +298,8 @@ fn save_settings(app: AppHandle, input: SettingsInput) -> Result<(), String> {
             .filter(|dir| !dir.is_empty())
             .map(PathBuf::from),
         safe_mode: input.safe_mode,
-        // 本机识别在它自己的窗口里开关，设置页不改它。
-        local_worker: state.server.settings().local_worker,
+        // 本机识别等开关在别的窗口里改，设置页不动它们。
+        ..state.server.settings()
     };
     settings.validate().map_err(|invalid| state.texts.invalid_settings(&invalid))?;
     if settings == state.server.settings() {
@@ -324,6 +351,8 @@ struct WorkerView {
     #[serde(flatten)]
     phase: WorkerPhase,
     enabled: bool,
+    /// 运行环境和模型都已就绪，开启时不用再下载。
+    ready: bool,
     platform: &'static str,
     /// Windows 上是否检测到 NVIDIA 显卡（没有时只能用 CPU，很慢）；macOS 为 None。
     nvidia: Option<bool>,
@@ -335,23 +364,64 @@ fn worker_state(app: AppHandle) -> WorkerView {
     WorkerView {
         phase: state.worker.phase(),
         enabled: state.server.settings().local_worker,
+        ready: state.worker.ready_to_run(),
         platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
         nvidia: shell_core::worker_env::has_nvidia(),
     }
 }
 
-/// 开启或关闭本机识别；失败后再点开启即重试。
+/// 开启或关闭本机识别；失败后再点开启即重试。`download` 为 false 时（稍后下载）停在“待下载”。
 #[tauri::command]
-fn worker_set(app: AppHandle, enabled: bool) -> Result<(), String> {
-    let state = shell(&app);
-    state.server.set_local_worker(enabled).map_err(|error| error.to_string())?;
+fn worker_set(app: AppHandle, enabled: bool, download: bool) -> Result<(), String> {
+    set_local_worker(&app, enabled, download)
+}
+
+fn set_local_worker(app: &AppHandle, enabled: bool, download: bool) -> Result<(), String> {
+    let state = shell(app);
+    let settings = state
+        .server
+        .update_flags(|settings| {
+            settings.local_worker = enabled;
+            settings.local_worker_download |= enabled && download;
+        })
+        .map_err(|error| error.to_string())?;
     if enabled {
-        state.worker.start(Some(local_connection(Arc::clone(&state.server))));
+        state.worker.start(Some(local_connection(Arc::clone(&state.server))), settings.local_worker_download);
     } else {
         let worker = Arc::clone(&state.worker);
         std::thread::spawn(move || worker.stop());
     }
     Ok(())
+}
+
+/// “待下载”时点“开始下载”。
+#[tauri::command]
+fn worker_download(app: AppHandle) -> Result<(), String> {
+    set_local_worker(&app, true, true)
+}
+
+#[derive(Serialize)]
+struct GpuPrompt {
+    name: Option<String>,
+}
+
+#[tauri::command]
+fn gpu_prompt(app: AppHandle) -> GpuPrompt {
+    let _ = &app;
+    GpuPrompt { name: shell_core::worker_env::nvidia_gpu_name() }
+}
+
+/// 检测到显卡时的选择：now 开启并立即下载，later 开启但稍后下载，no 不开启。
+#[tauri::command]
+fn gpu_choose(app: AppHandle, choice: String) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(GPU) {
+        let _ = window.destroy();
+    }
+    match choice.as_str() {
+        "now" => set_local_worker(&app, true, true),
+        "later" => set_local_worker(&app, true, false),
+        _ => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -412,8 +482,12 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 let handle = handle.clone();
                 std::thread::spawn(move || {
                     if let Some(state) = handle.try_state::<Shell>() {
-                        if state.server.settings().local_worker {
-                            state.worker.start(Some(local_connection(Arc::clone(&state.server))));
+                        let settings = state.server.settings();
+                        if settings.local_worker {
+                            state.worker.start(
+                                Some(local_connection(Arc::clone(&state.server))),
+                                settings.local_worker_download,
+                            );
                         }
                     }
                 });
@@ -470,6 +544,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // 主窗口始终存在（自启时隐藏），这样关闭设置窗口不会被当成“最后一个窗口关闭”而退出。
     let autostarted = std::env::args().any(|arg| arg == AUTOSTART_ARG);
     create_main(&handle, !autostarted)?;
+    prompt_gpu_once(&handle);
     std::thread::spawn(move || server.start(true));
     Ok(())
 }
@@ -491,7 +566,10 @@ fn main() {
             worker_state,
             worker_set,
             worker_open_logs,
-            worker_install_tools
+            worker_install_tools,
+            worker_download,
+            gpu_prompt,
+            gpu_choose
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

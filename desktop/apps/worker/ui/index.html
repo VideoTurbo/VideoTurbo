@@ -45,6 +45,7 @@
       <p class="help" id="t-download"></p>
       <div class="actions">
         <button id="cancel-change" hidden></button>
+        <button id="connect-later"></button>
         <button class="primary" id="connect"></button>
       </div>
     </section>
@@ -60,6 +61,7 @@
       <p class="help" id="hint"></p>
       <pre id="detail" hidden></pre>
       <div class="actions">
+        <button class="primary" id="download" hidden></button>
         <button id="tools" hidden></button>
         <button id="retry" hidden></button>
         <button id="pause"></button>
@@ -74,8 +76,9 @@
     const T = zh ? {
       sub: '让这台显卡电脑为 VideoTurbo 识别字幕', setup: '连接主程序',
       step1: '在 VideoTurbo 控制台打开“云主机 → 添加显卡电脑”，复制接入串。', step2: '粘贴到下面，点“连接”。',
-      download: '连接后会下载运行环境（约 2 GB）和识别模型（约 4 GB），之后不用再下载。与桌面、游戏共用显卡时，只在显卡空闲时接单。',
-      connect: '连接', cancel: '取消', placeholder: 'VT1:…',
+      download: '需要下载运行环境（约 2 GB）和识别模型（约 4 GB），之后不用再下载；可以现在下载，也可以先连接、等方便时再下载。与桌面、游戏共用显卡时，只在显卡空闲时接单。',
+      connect: '连接并立即下载', connectLater: '连接，稍后下载', cancel: '取消', placeholder: 'VT1:…',
+      pending: '等待下载', pendingHint: '还没有下载运行环境和识别模型（约 6 GB），下载好之前不会接识别任务。方便时点“开始下载”。', startDownload: '开始下载',
       off: '已暂停接单', waiting: '正在连接主程序…', installing: '正在安装运行环境', selfTest: '正在下载识别模型并自检（第一次需要较长时间）',
       running: '运行中：有识别任务时会自动处理', failed: '出错了', needTools: '需要先安装 Apple 的命令行开发工具（含 Git）',
       conflict: '这台电脑上 VideoTurbo 主程序应用的“本机识别”正在使用显卡，它停下后会自动接手',
@@ -85,8 +88,9 @@
     } : {
       sub: 'Let this GPU computer recognize subtitles for VideoTurbo', setup: 'Connect to the main app',
       step1: 'In the VideoTurbo console, open Cloud hosts → Add GPU computer and copy the connection code.', step2: 'Paste it below and click Connect.',
-      download: 'After connecting, the program environment (about 2 GB) and models (about 4 GB) are downloaded once. When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
-      connect: 'Connect', cancel: 'Cancel', placeholder: 'VT1:…',
+      download: 'The program environment (about 2 GB) and models (about 4 GB) are downloaded once; download now, or connect first and download when convenient. When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
+      connect: 'Connect and download now', connectLater: 'Connect, download later', cancel: 'Cancel', placeholder: 'VT1:…',
+      pending: 'Waiting to download', pendingHint: "The program environment and models (about 6 GB) aren't downloaded yet; no recognition jobs are taken until they are. Click \"Download now\" when convenient.", startDownload: 'Download now',
       off: 'Paused', waiting: 'Connecting to the main app…', installing: 'Installing the program environment', selfTest: 'Downloading models and running the self-test (the first time takes a while)',
       running: 'Running: jobs are processed automatically', failed: 'Something went wrong', needTools: "Apple's command line developer tools (including Git) are needed",
       conflict: 'Local recognition in the VideoTurbo main app on this computer is using the GPU; this takes over when it stops',
@@ -97,16 +101,16 @@
     const { invoke } = window.__TAURI__.core
     const $ = (id) => document.getElementById(id)
     const texts = { 't-sub': T.sub, 't-setup': T.setup, 't-step1': T.step1, 't-step2': T.step2, 't-download': T.download,
-      connect: T.connect, 'cancel-change': T.cancel, tools: T.tools, retry: T.retry, change: T.change, logs: T.logs }
+      connect: T.connect, 'connect-later': T.connectLater, download: T.startDownload, 'cancel-change': T.cancel, tools: T.tools, retry: T.retry, change: T.change, logs: T.logs }
     for (const [id, text] of Object.entries(texts)) $(id).textContent = text
     $('code').placeholder = T.placeholder
     let changing = false
     let view = null
 
-    $('connect').onclick = async () => {
+    async function connect(download) {
       $('code-error').hidden = true
       try {
-        await invoke('connect', { code: $('code').value })
+        await invoke('connect', { code: $('code').value, download })
         changing = false
         $('code').value = ''
         refresh()
@@ -115,6 +119,9 @@
         $('code-error').hidden = false
       }
     }
+    $('connect').onclick = () => connect(true)
+    $('connect-later').onclick = () => connect(false)
+    $('download').onclick = () => invoke('download').then(refresh)
     $('change').onclick = () => { changing = true; render(view) }
     $('cancel-change').onclick = () => { changing = false; render(view) }
     $('pause').onclick = () => invoke('pause', { paused: !view.paused }).then(refresh)
@@ -133,7 +140,7 @@
       $('gpu').hidden = !gpu
       if (setup) return
       const labels = { off: T.off, waiting: T.waiting, installing: T.installing, self_test: T.selfTest, running: T.running,
-                       failed: T.failed, need_tools: T.needTools, conflict: T.conflict }
+                       failed: T.failed, need_tools: T.needTools, conflict: T.conflict, pending: T.pending }
       $('state').textContent = v.paused ? T.off : (labels[v.phase] || v.phase)
       $('server').textContent = v.server_url ? T.server.replace('{url}', v.server_url) : ''
       const installing = v.phase === 'installing'
@@ -143,10 +150,12 @@
         $('step').textContent = `${v.index}/${v.total} ${zh ? v.zh : v.en}`
       }
       $('line').textContent = v.line || ''
-      $('hint').textContent = v.phase === 'need_tools' ? T.needToolsHint : v.phase === 'failed' ? v.message : ''
+      $('hint').textContent = v.phase === 'need_tools' ? T.needToolsHint : v.phase === 'pending' ? T.pendingHint
+        : v.phase === 'failed' ? v.message : ''
       $('detail').textContent = v.detail || ''
       $('detail').hidden = !v.detail
       $('tools').hidden = v.phase !== 'need_tools'
+      $('download').hidden = v.phase !== 'pending' || v.paused
       $('retry').hidden = !(v.phase === 'failed' || v.phase === 'need_tools')
       $('pause').textContent = v.paused ? T.resume : T.pause
     }

@@ -395,6 +395,7 @@ export default {
   'compute.addWorker.title': "添加显卡电脑",
   'compute.addWorker.step1': "在有 NVIDIA 显卡的 Windows 电脑上安装并打开 VideoTurbo Worker。",
   'compute.addWorker.step2': "首次打开时，把下面的接入串粘贴进去，它就会自动连上主程序。",
+  'compute.addWorker.localHint': "运行主程序的这台电脑有 NVIDIA 显卡时，不用另装：在托盘菜单“本机识别…”里打开即可。",
   'compute.addWorker.address': "接入地址",
   'compute.addWorker.addressPlaceholder': "例如 http://192.168.1.10:8766",
   'compute.addWorker.addressHelp': "显卡电脑要能访问这个地址。不在同一局域网时，填外网地址或域名，并在路由器上只开放这个端口。",

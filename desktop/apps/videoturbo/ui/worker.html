@@ -38,6 +38,14 @@
       </div>
       <p class="help" id="t-help"></p>
       <p class="warn" id="no-gpu" hidden></p>
+      <div id="choose" hidden>
+        <p class="help" id="t-choose"></p>
+        <footer>
+          <button id="choose-cancel"></button>
+          <button id="choose-later"></button>
+          <button class="primary" id="choose-now"></button>
+        </footer>
+      </div>
     </section>
     <section id="status-box">
       <div class="state" id="state"></div>
@@ -50,6 +58,7 @@
       <pre id="detail" hidden></pre>
     </section>
     <footer>
+      <button class="primary" id="download" hidden></button>
       <button id="tools" hidden></button>
       <button id="retry" hidden></button>
       <button id="logs"></button>
@@ -63,12 +72,16 @@
       off: '未开启', waiting: '正在连接主程序…', installing: '正在安装运行环境', selfTest: '正在下载识别模型并自检（第一次需要较长时间）',
       running: '运行中：有识别任务时会自动处理', failed: '出错了', conflict: '这台电脑上的 VideoTurbo Worker 正在使用显卡，它停下后会自动接手', needTools: '需要先安装 Apple 的命令行开发工具（含 Git）',
       needToolsHint: '点“安装命令行工具”，在弹出的窗口里按提示安装，装好后点“重试”。', tools: '安装命令行工具', retry: '重试', logs: '打开日志文件夹',
+      pending: '等待下载', pendingHint: '还没有下载运行环境和识别模型（约 6 GB），下载好之前这台电脑不会接识别任务。方便时点“开始下载”。', download: '开始下载',
+      choose: '开启后需要下载运行环境（约 2 GB）和识别模型（约 4 GB）。现在下载，还是先开启、等方便时再下载？', chooseNow: '立即下载', chooseLater: '稍后下载', cancel: '取消',
     } : {
       title: 'Local recognition', help: 'Let this computer process speech recognition jobs too. The first time downloads the program environment (about 2 GB) and models (about 4 GB). When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
       noGpu: 'No NVIDIA GPU detected; recognition will use the CPU and be very slow.', macCpu: 'On a Mac, recognition uses the CPU and is much slower than an NVIDIA GPU.',
       off: 'Off', waiting: 'Connecting to the main app…', installing: 'Installing the program environment', selfTest: 'Downloading models and running the self-test (the first time takes a while)',
       running: 'Running: jobs are processed automatically', failed: 'Something went wrong', conflict: 'VideoTurbo Worker on this computer is using the GPU; this takes over when it stops', needTools: "Apple's command line developer tools (including Git) are needed",
       needToolsHint: 'Click "Install command line tools", follow the prompts, then click "Retry".', tools: 'Install command line tools', retry: 'Retry', logs: 'Open logs folder',
+      pending: 'Waiting to download', pendingHint: "The program environment and models (about 6 GB) aren't downloaded yet; this computer won't take recognition jobs until they are. Click \"Download now\" when convenient.", download: 'Download now',
+      choose: 'Turning this on downloads the program environment (about 2 GB) and models (about 4 GB). Download now, or turn on and download later?', chooseNow: 'Download now', chooseLater: 'Download later', cancel: 'Cancel',
     }
     const { invoke } = window.__TAURI__.core
     const $ = (id) => document.getElementById(id)
@@ -77,24 +90,46 @@
     $('tools').textContent = T.tools
     $('retry').textContent = T.retry
     $('logs').textContent = T.logs
+    $('download').textContent = T.download
+    $('t-choose').textContent = T.choose
+    $('choose-now').textContent = T.chooseNow
+    $('choose-later').textContent = T.chooseLater
+    $('choose-cancel').textContent = T.cancel
     let busy = false
+    let view = null
 
-    $('enabled').onchange = async () => {
+    async function setEnabled(enabled, download) {
       busy = true
-      try { await invoke('worker_set', { enabled: $('enabled').checked }) } finally { busy = false }
+      $('choose').hidden = true
+      try { await invoke('worker_set', { enabled, download }) } finally { busy = false }
       refresh()
     }
-    $('retry').onclick = () => invoke('worker_set', { enabled: true }).then(refresh)
+    $('enabled').onchange = () => {
+      const enabled = $('enabled').checked
+      // 还要下载时先问：立即下载，还是先开启、稍后再下载。
+      if (enabled && view && !view.ready) {
+        busy = true
+        $('choose').hidden = false
+        return
+      }
+      setEnabled(enabled, enabled)
+    }
+    $('choose-now').onclick = () => setEnabled(true, true)
+    $('choose-later').onclick = () => setEnabled(true, false)
+    $('choose-cancel').onclick = () => { $('choose').hidden = true; busy = false; $('enabled').checked = false }
+    $('download').onclick = () => invoke('worker_download').then(refresh)
+    $('retry').onclick = () => invoke('worker_download').then(refresh)
     $('tools').onclick = () => invoke('worker_install_tools')
     $('logs').onclick = () => invoke('worker_open_logs')
 
-    function render(view) {
+    function render(v) {
+      view = v
       if (!busy) $('enabled').checked = view.enabled
       const warn = view.platform === 'macos' ? T.macCpu : view.nvidia === false ? T.noGpu : ''
       $('no-gpu').textContent = warn
       $('no-gpu').hidden = !warn || !view.enabled
       const labels = { off: T.off, waiting: T.waiting, installing: T.installing, self_test: T.selfTest,
-                       running: T.running, failed: T.failed, need_tools: T.needTools, conflict: T.conflict }
+                       running: T.running, failed: T.failed, need_tools: T.needTools, conflict: T.conflict, pending: T.pending }
       $('state').textContent = labels[view.phase] || view.phase
       const installing = view.phase === 'installing'
       $('progress').hidden = !installing
@@ -103,10 +138,12 @@
         $('step').textContent = `${view.index}/${view.total} ${zh ? view.zh : view.en}`
       }
       $('line').textContent = view.line || ''
-      $('hint').textContent = view.phase === 'need_tools' ? T.needToolsHint : view.phase === 'failed' ? view.message : ''
+      $('hint').textContent = view.phase === 'need_tools' ? T.needToolsHint : view.phase === 'pending' ? T.pendingHint
+        : view.phase === 'failed' ? view.message : ''
       $('detail').textContent = view.detail || ''
       $('detail').hidden = !view.detail
       $('tools').hidden = view.phase !== 'need_tools'
+      $('download').hidden = view.phase !== 'pending'
       $('retry').hidden = !(view.enabled && (view.phase === 'failed' || view.phase === 'need_tools'))
     }
 

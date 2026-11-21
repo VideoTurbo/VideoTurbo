@@ -32,6 +32,10 @@ const MAIN: &str = "main";
 struct AppSettings {
     /// 暂停接单：识别程序停着，下次打开应用也不自动启动。
     paused: bool,
+    /// 粘贴后还没写进配置的接入串（选了稍后下载，或下载还没完成）。写进配置后清掉。
+    pending_code: Option<String>,
+    /// 用户同意下载运行环境和模型。
+    download_approved: bool,
 }
 
 struct App {
@@ -65,6 +69,7 @@ fn save_settings(path: &PathBuf, settings: &AppSettings) {
 fn status_text(lang: Lang, phase: &WorkerPhase) -> String {
     let text = match phase {
         WorkerPhase::Off => lang.pick("已暂停接单", "Paused"),
+        WorkerPhase::Pending => lang.pick("等待下载", "Waiting to download"),
         WorkerPhase::Waiting => lang.pick("正在连接主程序…", "Connecting…"),
         WorkerPhase::Installing { index, total, .. } => {
             return match lang {
@@ -109,6 +114,19 @@ fn open_logs_folder(handle: &AppHandle) {
     let _ = handle.opener().open_path(folder.to_string_lossy(), None::<&str>);
 }
 
+/// 按保存的状态启动：有还没写进配置的接入串就用它，否则沿用已写好的配置。
+/// 用户还没同意下载时，需要下载就停在“待下载”。
+fn resume(worker: &Arc<WorkerManager>, settings: &AppSettings) {
+    if let Some(connection) = settings.pending_code.as_deref().and_then(connection::parse) {
+        worker.start(
+            Some(Box::new(move |_alive: &dyn Fn() -> bool| Some(connection))),
+            settings.download_approved,
+        );
+    } else if worker.env().configured() {
+        worker.start(None, true);
+    }
+}
+
 fn set_paused(handle: &AppHandle, paused: bool) {
     let state = app(handle);
     let mut settings = load_settings(&state.settings_file);
@@ -122,8 +140,8 @@ fn set_paused(handle: &AppHandle, paused: bool) {
     let worker = Arc::clone(&state.worker);
     if paused {
         std::thread::spawn(move || worker.stop());
-    } else if worker.env().configured() {
-        worker.start(None);
+    } else {
+        resume(&worker, &settings);
     }
 }
 
@@ -220,19 +238,33 @@ struct View {
 fn state(handle: AppHandle) -> View {
     let state = app(&handle);
     let env = state.worker.env();
+    let mut settings = load_settings(&state.settings_file);
+    let pending = settings.pending_code.as_deref().and_then(connection::parse);
+    // 接入串已经写进配置（下载、写配置都完成了），不用再保存它。
+    if let Some(connection) = &pending {
+        if env.config_value("server_url").as_deref() == Some(connection.server_url.as_str())
+            && env.config_value("worker_token").as_deref() == Some(connection.token.as_str())
+        {
+            settings.pending_code = None;
+            save_settings(&state.settings_file, &settings);
+        }
+    }
     View {
         phase: state.worker.phase(),
-        configured: env.configured(),
-        server_url: env.config_value("server_url"),
-        paused: load_settings(&state.settings_file).paused,
+        configured: env.configured() || pending.is_some(),
+        server_url: pending
+            .map(|connection| connection.server_url)
+            .or_else(|| env.config_value("server_url")),
+        paused: settings.paused,
         platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
         nvidia: worker_env::has_nvidia(),
     }
 }
 
-/// 用接入串连接主程序（第一次设置或更换主程序）；之后自动安装、自检并开始接单。
+/// 用接入串连接主程序（第一次设置或更换主程序）。`download` 为 true 时立即下载运行环境和模型，
+/// 之后自检并开始接单；为 false 时先保存，停在“待下载”。
 #[tauri::command]
-fn connect(handle: AppHandle, code: String) -> Result<(), String> {
+fn connect(handle: AppHandle, code: String, download: bool) -> Result<(), String> {
     let state = app(&handle);
     let Some(connection) = connection::parse(&code) else {
         return Err(state
@@ -244,13 +276,31 @@ fn connect(handle: AppHandle, code: String) -> Result<(), String> {
             .into());
     };
     state.logger.info(&format!("连接主程序 {}", connection.server_url));
-    save_settings(&state.settings_file, &AppSettings { paused: false });
+    let previous = load_settings(&state.settings_file);
+    let settings = AppSettings {
+        paused: false,
+        pending_code: Some(code.trim().to_string()),
+        download_approved: previous.download_approved || download,
+    };
+    save_settings(&state.settings_file, &settings);
     let _ = state.pause_item.set_text(state.lang.pick("暂停接单", "Pause"));
     // 设置好以后默认开机自启，像系统服务一样常驻；用户可以在托盘里关掉。
     let _ = handle.autolaunch().enable();
     let _ = state.autostart_item.set_checked(handle.autolaunch().is_enabled().unwrap_or(false));
-    state.worker.start(Some(Box::new(move |_alive: &dyn Fn() -> bool| Some(connection))));
+    let _ = connection;
+    resume(&state.worker, &settings);
     Ok(())
+}
+
+/// “待下载”时点“开始下载”。
+#[tauri::command]
+fn download(handle: AppHandle) {
+    let state = app(&handle);
+    let mut settings = load_settings(&state.settings_file);
+    settings.download_approved = true;
+    settings.paused = false;
+    save_settings(&state.settings_file, &settings);
+    resume(&state.worker, &settings);
 }
 
 #[tauri::command]
@@ -260,7 +310,7 @@ fn pause(handle: AppHandle, paused: bool) {
 
 #[tauri::command]
 fn retry(handle: AppHandle) {
-    set_paused(&handle, false);
+    download(handle);
 }
 
 #[tauri::command]
@@ -350,12 +400,12 @@ fn setup(tauri_app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     build_tray(&handle, &state, &status_item)?;
     app_manage(tauri_app, state);
 
-    let configured = worker.env().configured();
+    let configured = worker.env().configured() || settings.pending_code.is_some();
     // 还没设置时一定弹出窗口，即使是开机自启。
     let autostarted = std::env::args().any(|arg| arg == AUTOSTART_ARG);
     create_main(&handle, !autostarted || !configured)?;
-    if configured && !settings.paused {
-        worker.start(None);
+    if !settings.paused {
+        resume(&worker, &settings);
     }
     Ok(())
 }
@@ -370,7 +420,15 @@ fn main() {
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])))
         .plugin(tauri_plugin_opener::init())
         .plugin(updater::plugin())
-        .invoke_handler(tauri::generate_handler![state, connect, pause, retry, open_logs, install_tools])
+        .invoke_handler(tauri::generate_handler![
+            state,
+            connect,
+            download,
+            pause,
+            retry,
+            open_logs,
+            install_tools
+        ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
