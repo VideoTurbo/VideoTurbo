@@ -80,8 +80,9 @@ fn create_main(app: &AppHandle, visible: bool) -> tauri::Result<()> {
     // 以及标题栏的样式：macOS 是透明标题栏（overlay），顶栏给左上角的窗口按钮让位；
     // Windows 没有系统标题栏（custom），页面自己在顶栏右侧画最小化、最大化、关闭按钮。
     let titlebar = if cfg!(target_os = "macos") { "overlay" } else { "custom" };
+    // 只写全局变量，由页面自己标到 <html> 上：Windows（WebView2）执行这段脚本时 <html> 还不存在。
     let script = format!(
-        "window.__VIDEO_TURBO_SHELL_THEME__ = '{}'; document.documentElement.dataset.titlebar = '{titlebar}';",
+        "window.__VIDEO_TURBO_SHELL_THEME__ = '{}'; window.__VIDEO_TURBO_TITLEBAR__ = '{titlebar}';",
         theme_name(theme)
     );
     let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::App("index.html".into()))

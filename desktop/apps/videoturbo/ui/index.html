@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VideoTurbo</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    // 外壳在页面加载前写入标题栏样式；标到 <html> 上，样式表据此显示拖动条和窗口按钮。
+    if (window.__VIDEO_TURBO_TITLEBAR__) document.documentElement.dataset.titlebar = window.__VIDEO_TURBO_TITLEBAR__
+  </script>
   <style>
     main { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
     .box { max-width: 640px; width: 100%; text-align: center; }
