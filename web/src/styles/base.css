@@ -591,3 +591,10 @@ details.detail-files>summary{font-size:12px;color:var(--text-3);cursor:pointer;u
 .modal-card.wide{width:min(900px,calc(100vw - 24px))}
 .row-actions .n-button{margin-right:4px}
 .link-btn:hover{color:var(--link-hover)}
+/* 全局提示：宽度有上限，长地址可任意折行；新提醒只占一行，点击打开提醒抽屉。 */
+.n-message{max-width:min(560px,calc(100vw - 32px))}
+.n-message .n-message__content{overflow-wrap:anywhere}
+.toast-notice{display:flex;align-items:baseline;gap:8px;max-width:min(420px,calc(100vw - 120px));white-space:nowrap;cursor:pointer}
+.toast-notice-text{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.toast-notice:hover .toast-notice-text{text-decoration:underline}
+.toast-notice-extra{flex:none;color:var(--text-3);font-size:12px}
