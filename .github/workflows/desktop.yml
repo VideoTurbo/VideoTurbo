@@ -81,10 +81,15 @@ jobs:
         run: uv run python deploy/desktop/build_sidecar.py
       - name: 外壳代码检查与单元测试
         working-directory: desktop
+        # 两个应用的 Tauri 构建脚本会把安装包资源（主程序、识别程序部署包等）复制到 target 目录。
+        # 同时运行多个构建脚本（--all-targets 的不同配置、两个应用）时，Windows 上会因文件被占用而失败；
+        # 先并行编译依赖，再用 -j 1 逐个编译两个应用。
         run: |
           cargo fmt --check
-          cargo clippy --all-targets --locked -- -D warnings
-          cargo test --locked
+          cargo clippy --all-targets --locked -p shell-core -p shell-tauri -- -D warnings
+          cargo clippy --all-targets --locked -j 1 -- -D warnings
+          cargo test --locked --no-run -p shell-core -p shell-tauri
+          cargo test --locked -j 1
       - name: 安装 Tauri 命令行工具
         working-directory: desktop
         run: npm ci
