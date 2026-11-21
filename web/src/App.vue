@@ -56,8 +56,8 @@ async function stopScan(): Promise<void> {
     <header class="topbar">
       <div class="topbar-inner">
         <a class="brand" href="/" :aria-label="t('app.brandHome')">
-          <!-- 图标由主控提供，不经过打包，所以用绑定写法。 -->
-          <img :src="'/favicon.svg'" alt="" width="22" height="22" />
+          <!-- 图标由主控提供，不经过打包，所以用绑定写法。换图标时改 v，浏览器缓存一天，不改会继续显示旧图标。 -->
+          <img :src="'/favicon.svg?v=2'" alt="" width="22" height="22" />
           <h1>VideoTurbo</h1>
           <span v-if="status?.version" class="brand-version">v{{ status.version }}</span>
         </a>

@@ -49,3 +49,17 @@ def test_both_apps_share_the_same_model_list_script() -> None:
     apps = Path(__file__).resolve().parents[1] / "desktop" / "apps"
     main = (apps / "videoturbo" / "ui" / "models.js").read_bytes()
     assert main == (apps / "worker" / "ui" / "models.js").read_bytes()
+
+
+def test_console_favicon_matches_the_logo() -> None:
+    # 控制台图标、桌面版图标（make-icons.sh 按同样的坐标画）和头像是同一个图形。
+    import re
+
+    from video_turbo.orchestrator.dashboard import FAVICON_SVG
+
+    project = Path(__file__).resolve().parents[1]
+    shapes = re.compile(r'<rect x="[^"]+" y="[^"]+" width="[^"]+" height="[^"]+" rx="[^"]+"(?: opacity="[^"]+")?/>')
+    logo = shapes.findall((project / "desktop" / "icons" / "logo.svg").read_text(encoding="utf-8"))
+    assert len(logo) == 6
+    assert shapes.findall(FAVICON_SVG) == logo
+    assert shapes.findall((project / "docs" / "images" / "brand" / "avatar.svg").read_text(encoding="utf-8")) == logo
