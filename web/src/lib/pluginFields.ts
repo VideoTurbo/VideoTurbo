@@ -14,10 +14,30 @@ export function initialValues(fields: PluginField[], saved: Record<string, Field
   }))
 }
 
-/** 提交的值：密钥字段只在填写了时提交（留空表示不修改）；其他字段都提交，空值表示清空。 */
+function conditionText(value: FieldValue | undefined): string {
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  return value == null ? '' : String(value)
+}
+
+/** 按其他字段当前的值（没填的取默认值）判断字段是否显示，见字段的 visible_when。 */
+export function isVisible(field: PluginField, fields: PluginField[], values: FieldValues): boolean {
+  if (!field.visible_when) return true
+  return Object.entries(field.visible_when).every(([key, allowed]) => {
+    const value = values[key] ?? fields.find((item) => item.key === key)?.default
+    return allowed.includes(conditionText(value))
+  })
+}
+
+/** 当前显示的字段。 */
+export function visibleFields(fields: PluginField[], values: FieldValues): PluginField[] {
+  return fields.filter((field) => isVisible(field, fields, values))
+}
+
+/** 提交的值：不显示的字段不提交（主程序会清掉它的值）；密钥字段只在填写了时提交（留空表示不修改）；
+ *  其他字段都提交，空值表示清空。 */
 export function payloadValues(fields: PluginField[], values: FieldValues): FieldValues {
   const result: FieldValues = {}
-  for (const field of fields) {
+  for (const field of visibleFields(fields, values)) {
     const value = values[field.key]
     if (field.type === 'switch') result[field.key] = value === true
     else if (field.type === 'number') result[field.key] = typeof value === 'number' ? value : null

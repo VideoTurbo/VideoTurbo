@@ -540,6 +540,7 @@ MESSAGES: dict[str, str] = {
     "plugins.install.missingKindApi": "PLUGIN_API doesn't declare the interface version for the {label} plugin ({id}).",
     "plugins.install.badId": "The id of plugin class {cls} may only use lowercase letters, digits, underscores and hyphens, up to 64 characters.",
     "plugins.install.noLabel": "Plugin class {cls} has no name (label).",
+    "plugins.install.badCondition": "Field {field} of plugin class {cls} has a display condition on field {key}, which doesn't exist.",
     "plugins.install.sourceCredentials": "Media source plugins don't have multiple configurations; change credential_fields to settings_fields.",
     "plugins.install.sharedSettings": "When one file has several plugin classes, they share the plugin settings; declare them in module-level PLUGIN_SETTINGS instead of settings_fields on a class.",
     "plugins.install.settingsType": "PLUGIN_SETTINGS must be a tuple of CredentialField.",

@@ -431,6 +431,8 @@ export interface PluginField {
   integer?: boolean
   /** 地址类字段：修改后必须重新填写已保存的密钥。 */
   binds_secrets?: boolean
+  /** 显示条件：{其他字段的 key: 取值列表}，每一项都满足时才显示；开关的取值是 "true" / "false"。 */
+  visible_when?: Record<string, string[]> | null
 }
 
 export interface CloudProviderType {
