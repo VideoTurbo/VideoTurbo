@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // 添加或编辑媒体库。添加分三步：选来源 → 选文件夹 → 名称和语言；编辑只改名称、语言和启用，来源和文件夹不能改。
-// 来源是本地文件夹或已安装的网盘插件；网盘插件的账号等在插件设置里填写，还没设置的点一下就打开设置弹窗。
+// 来源是本地文件夹、已安装的网盘插件或网络存储（WebDAV、Samba，在“网络存储”里添加）；
+// 网盘插件的账号等在插件设置里填写，还没设置的点一下就打开设置弹窗。
 import { NButton, NInput, NModal, NSelect } from 'naive-ui'
 import { computed, reactive, ref, watch } from 'vue'
 import { api, errorMessage, type FolderItem, type FolderPage, type LanguageInfo, type MediaLibrary, type MediaSourceOption } from '@/api'
@@ -10,6 +11,7 @@ import SwitchRow from '@/components/SwitchRow.vue'
 import { toast } from '@/lib/feedback'
 import PluginSettingsDialog from './PluginSettingsDialog.vue'
 import { t } from '@/i18n'
+import { openSettings } from '@/stores/navigation'
 import { isDesktop } from '@/stores/status'
 
 const props = defineProps<{
@@ -43,6 +45,8 @@ watch(show, (open) => {
 })
 
 // ---- 第 1 步：来源 ----
+/** 来源图标：编辑时用媒体库的，添加时用所选来源的。 */
+const sourceIcon = computed(() => props.library?.source_icon || props.sources.find((item) => item.id === form.source)?.icon || '')
 const sourceLabel = computed(() => form.source === LOCAL
   ? t('settings.library.local')
   : props.sources.find((item) => item.id === form.source)?.label || props.library?.source_label || form.source)
@@ -56,6 +60,11 @@ function pickSource(source: string): void {
 /** 网盘插件还没设置好时先打开设置弹窗，保存后再选它。 */
 const settingsOpen = ref(false)
 const settingsPlugin = ref<string | null>(null)
+
+function addStorage(): void {
+  show.value = false
+  openSettings('storage')
+}
 
 function pickPlugin(source: MediaSourceOption): void {
   if (!source.problem) return pickSource(source.id)
@@ -186,6 +195,7 @@ const title = computed(() => (props.library ? t('settings.library.editTitle', { 
         </span>
         <AppIcon :name="source.problem ? 'gear' : 'chevron'" />
       </button>
+      <p class="field-help">{{ t('settings.library.storageHint') }} <a href="#" @click.prevent="addStorage">{{ t('settings.nav.storage') }}</a> {{ t('settings.library.storageHintEnd') }}</p>
     </div>
 
     <!-- 第 2 步：文件夹 -->
@@ -218,7 +228,7 @@ const title = computed(() => (props.library ? t('settings.library.editTitle', { 
     <!-- 第 3 步：名称和语言（编辑时只有这一步） -->
     <div v-else>
       <div class="library-summary">
-        <span class="plugin-icon"><img v-if="library?.source_icon" :src="library.source_icon" alt=""><AppIcon v-else :name="form.source === LOCAL ? 'folder' : 'cloud'" /></span>
+        <span class="plugin-icon"><img v-if="sourceIcon" :src="sourceIcon" alt=""><AppIcon v-else :name="form.source === LOCAL ? 'folder' : 'cloud'" /></span>
         <span class="source-option-text"><b class="mono">{{ form.path }}</b><span>{{ sourceLabel }}<template v-if="library"> {{ t('settings.library.fixedHelp') }}</template></span></span>
         <NButton v-if="!library" size="small" quaternary @click="step = 'folder'">{{ t('settings.library.change') }}</NButton>
       </div>

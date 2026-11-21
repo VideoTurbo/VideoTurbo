@@ -26,7 +26,8 @@ import WorkerTokenSection from './WorkerTokenSection.vue'
 type Category = SettingsCategory
 const navigation: { heading: string; items: { id: Category; label: string; icon: IconName }[] }[] = [
   { heading: t('settings.group.general'), items: [
-    { id: 'media', label: t('settings.nav.media'), icon: 'folder' }, { id: 'media_servers', label: t('settings.nav.mediaServers'), icon: 'play' },
+    { id: 'media', label: t('settings.nav.media'), icon: 'folder' }, { id: 'storage', label: t('settings.nav.storage'), icon: 'server' },
+    { id: 'media_servers', label: t('settings.nav.mediaServers'), icon: 'play' },
     { id: 'subtitle', label: t('settings.nav.subtitle'), icon: 'captions' }, { id: 'restore', label: t('settings.nav.restore'), icon: 'wand' },
     { id: 'cloud', label: t('settings.nav.cloud'), icon: 'cloud' }, { id: 'plugins', label: t('settings.nav.plugins'), icon: 'code' }, { id: 'ui', label: t('settings.nav.ui'), icon: 'monitor' },
   ] },
@@ -171,6 +172,12 @@ async function save(): Promise<void> {
             <ConfigForm v-model="form.sections.scan" :fields="configSchemas.scan" />
           </div>
         </template>
+
+        <ConnectionsSection
+          v-else-if="category === 'storage'" kind="media-sources" :title="t('settings.nav.storage')"
+          :lead="t('settings.storageLead')"
+          :empty="t('settings.storageEmpty')"
+        />
 
         <ConnectionsSection
           v-else-if="category === 'media_servers'" kind="media-servers" :title="t('settings.nav.mediaServers')"

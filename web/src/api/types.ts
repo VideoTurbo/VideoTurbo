@@ -500,7 +500,9 @@ export interface PluginSettingsInfo {
 
 /** 添加媒体库时可选的网盘插件。 */
 export interface MediaSourceOption {
+  /** 网盘插件的 id，或网络存储（WebDAV、Samba 等）一份配置的 id。 */
   id: string
+  kind: 'plugin' | 'connection'
   label: string
   description: string
   icon: string
@@ -548,10 +550,10 @@ export interface PluginType {
 }
 
 /** 有多份配置的插件类型，对应接口路径。 */
-export type ConnectionKind = 'media-servers' | 'notifiers'
+export type ConnectionKind = 'media-servers' | 'notifiers' | 'media-sources'
 export type NoticeMinLevel = 'info' | 'warning' | 'error'
 
-/** 媒体服务器或通知的一份配置。密钥字段只返回掩码。 */
+/** 媒体服务器、通知或网络存储的一份配置。密钥字段只返回掩码。 */
 export interface PluginConnection {
   id: string
   type: string
