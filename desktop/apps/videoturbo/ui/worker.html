@@ -61,13 +61,13 @@
       title: '本机识别', help: '让这台电脑也处理语音识别任务。第一次开启时会下载运行环境（约 2 GB）和识别模型（约 4 GB），之后不用再下载。与桌面、游戏共用显卡时，只在显卡空闲时接单。',
       noGpu: '没有检测到 NVIDIA 显卡，识别会用 CPU，速度很慢。', macCpu: 'Mac 上识别使用 CPU，速度比 NVIDIA 显卡慢很多。',
       off: '未开启', waiting: '正在连接主程序…', installing: '正在安装运行环境', selfTest: '正在下载识别模型并自检（第一次需要较长时间）',
-      running: '运行中：有识别任务时会自动处理', failed: '出错了', needTools: '需要先安装 Apple 的命令行开发工具（含 Git）',
+      running: '运行中：有识别任务时会自动处理', failed: '出错了', conflict: '这台电脑上的 VideoTurbo Worker 正在使用显卡，它停下后会自动接手', needTools: '需要先安装 Apple 的命令行开发工具（含 Git）',
       needToolsHint: '点“安装命令行工具”，在弹出的窗口里按提示安装，装好后点“重试”。', tools: '安装命令行工具', retry: '重试', logs: '打开日志文件夹',
     } : {
       title: 'Local recognition', help: 'Let this computer process speech recognition jobs too. The first time downloads the program environment (about 2 GB) and models (about 4 GB). When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
       noGpu: 'No NVIDIA GPU detected; recognition will use the CPU and be very slow.', macCpu: 'On a Mac, recognition uses the CPU and is much slower than an NVIDIA GPU.',
       off: 'Off', waiting: 'Connecting to the main app…', installing: 'Installing the program environment', selfTest: 'Downloading models and running the self-test (the first time takes a while)',
-      running: 'Running: jobs are processed automatically', failed: 'Something went wrong', needTools: "Apple's command line developer tools (including Git) are needed",
+      running: 'Running: jobs are processed automatically', failed: 'Something went wrong', conflict: 'VideoTurbo Worker on this computer is using the GPU; this takes over when it stops', needTools: "Apple's command line developer tools (including Git) are needed",
       needToolsHint: 'Click "Install command line tools", follow the prompts, then click "Retry".', tools: 'Install command line tools', retry: 'Retry', logs: 'Open logs folder',
     }
     const { invoke } = window.__TAURI__.core
@@ -94,7 +94,7 @@
       $('no-gpu').textContent = warn
       $('no-gpu').hidden = !warn || !view.enabled
       const labels = { off: T.off, waiting: T.waiting, installing: T.installing, self_test: T.selfTest,
-                       running: T.running, failed: T.failed, need_tools: T.needTools }
+                       running: T.running, failed: T.failed, need_tools: T.needTools, conflict: T.conflict }
       $('state').textContent = labels[view.phase] || view.phase
       const installing = view.phase === 'installing'
       $('progress').hidden = !installing

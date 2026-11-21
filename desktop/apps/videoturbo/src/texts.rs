@@ -54,8 +54,8 @@ impl Texts {
     pub fn local_worker_title(&self) -> &'static str {
         self.pick("VideoTurbo 本机识别", "VideoTurbo Local Recognition")
     }
-    pub fn worker_status(&self, phase: &crate::local_worker::WorkerPhase) -> String {
-        use crate::local_worker::WorkerPhase as P;
+    pub fn worker_status(&self, phase: &shell_core::worker_manager::WorkerPhase) -> String {
+        use shell_core::worker_manager::WorkerPhase as P;
         let text = match phase {
             P::Off => self.pick("本机识别：未开启", "Local recognition: off"),
             P::Waiting => self.pick("本机识别：正在连接…", "Local recognition: connecting…"),
@@ -72,6 +72,10 @@ impl Texts {
                 self.pick("本机识别：正在下载模型并自检…", "Local recognition: downloading models…")
             }
             P::Running => self.pick("本机识别：运行中", "Local recognition: running"),
+            P::Conflict => self.pick(
+                "本机识别：识别机应用正在使用显卡",
+                "Local recognition: the Worker app is using the GPU",
+            ),
             P::Failed { .. } => self.pick("本机识别：出错了", "Local recognition: error"),
         };
         text.to_string()

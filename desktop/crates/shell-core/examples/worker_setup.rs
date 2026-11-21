@@ -24,6 +24,7 @@ fn main() {
         uv,
         ffmpeg_dir: resources.join("ffmpeg"),
         language: "zh-Hans".into(),
+        config_dir: "config".into(),
     };
     let result = match command.as_str() {
         "configure" => {

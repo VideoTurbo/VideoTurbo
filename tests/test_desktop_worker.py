@@ -116,3 +116,16 @@ def test_status_reflects_install_and_config(tmp_path: Path, capsys) -> None:
     tool.main(["status", "--root", str(tmp_path), "--bundle", str(PROJECT)])
     assert json.loads(capsys.readouterr().out) == {
         "installed": False, "version": "", "current_version": __version__, "configured": False, "server_url": ""}
+
+
+def test_worker_app_keeps_its_own_config(tmp_path: Path) -> None:
+    # 识别机应用与主程序的本机识别共用环境和模型，但各自连自己的主程序。
+    tool = load_tool()
+    tool.main(["configure", "--root", str(tmp_path), "--bundle", str(PROJECT),
+               "--server-url", "http://127.0.0.1:8766", "--token", "local"])
+    tool.main(["configure", "--root", str(tmp_path), "--bundle", str(PROJECT), "--config-dir", "config-worker",
+               "--server-url", "http://nas:8766", "--token", "remote"])
+    local = yaml.safe_load((tmp_path / "config" / "worker.yaml").read_text(encoding="utf-8"))
+    remote = yaml.safe_load((tmp_path / "config-worker" / "worker.yaml").read_text(encoding="utf-8"))
+    assert (local["server_url"], remote["server_url"]) == ("http://127.0.0.1:8766", "http://nas:8766")
+    assert remote["asr"]["download_root"] == "../models"

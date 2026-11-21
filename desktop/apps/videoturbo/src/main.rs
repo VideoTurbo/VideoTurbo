@@ -7,7 +7,6 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod local_worker;
 mod server;
 mod texts;
 
@@ -24,9 +23,10 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, Wind
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_opener::OpenerExt as _;
 
-use local_worker::{LocalWorker, WorkerPhase};
 use server::{Paths, Phase, Server};
+use shell_core::connection::Connection;
 use shell_core::worker_env::WorkerEnv;
+use shell_core::worker_manager::{Connect, WorkerManager, WorkerPhase};
 use texts::Texts;
 
 const AUTOSTART_ARG: &str = "--autostart";
@@ -36,7 +36,7 @@ const WORKER: &str = "worker";
 
 struct Shell {
     server: Arc<Server>,
-    worker: Arc<LocalWorker>,
+    worker: Arc<WorkerManager>,
     texts: Arc<Texts>,
     logger: Arc<Logger>,
     status_item: MenuItem<Wry>,
@@ -283,6 +283,37 @@ fn save_settings(app: AppHandle, input: SettingsInput) -> Result<(), String> {
     Ok(())
 }
 
+/// 本机识别的接入信息：等主程序就绪后，凭这次启动的令牌从本机接口取接入密钥和端口。
+fn local_connection(server: Arc<Server>) -> Connect {
+    #[derive(Deserialize)]
+    struct Access {
+        worker_token: String,
+        worker_port: u16,
+    }
+    Box::new(move |alive: &dyn Fn() -> bool| loop {
+        if !alive() {
+            return None;
+        }
+        if let Some((port, token)) = server.ready() {
+            let reply = shell_core::process::http_get(
+                port,
+                "/api/auth/desktop/worker",
+                &[("X-VideoTurbo-Desktop-Token", &token)],
+                std::time::Duration::from_secs(5),
+            );
+            if let Some((200, body)) = reply {
+                if let Ok(access) = serde_json::from_str::<Access>(&body) {
+                    return Some(Connection {
+                        server_url: format!("http://127.0.0.1:{}", access.worker_port),
+                        token: access.worker_token,
+                    });
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    })
+}
+
 #[derive(Serialize)]
 struct WorkerView {
     #[serde(flatten)]
@@ -293,18 +324,6 @@ struct WorkerView {
     nvidia: Option<bool>,
 }
 
-fn has_nvidia() -> Option<bool> {
-    if !cfg!(windows) {
-        return None;
-    }
-    let system = std::env::var_os("SystemRoot")
-        .map(|root| PathBuf::from(root).join("System32").join("nvidia-smi.exe"));
-    let in_path = std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("nvidia-smi.exe").is_file()))
-        .unwrap_or(false);
-    Some(in_path || system.map(|path| path.is_file()).unwrap_or(false))
-}
-
 #[tauri::command]
 fn worker_state(app: AppHandle) -> WorkerView {
     let state = shell(&app);
@@ -312,7 +331,7 @@ fn worker_state(app: AppHandle) -> WorkerView {
         phase: state.worker.phase(),
         enabled: state.server.settings().local_worker,
         platform: if cfg!(target_os = "macos") { "macos" } else { "windows" },
-        nvidia: has_nvidia(),
+        nvidia: shell_core::worker_env::has_nvidia(),
     }
 }
 
@@ -322,7 +341,7 @@ fn worker_set(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = shell(&app);
     state.server.set_local_worker(enabled).map_err(|error| error.to_string())?;
     if enabled {
-        state.worker.start(Arc::clone(&state.server));
+        state.worker.start(Some(local_connection(Arc::clone(&state.server))));
     } else {
         let worker = Arc::clone(&state.worker);
         std::thread::spawn(move || worker.stop());
@@ -332,7 +351,7 @@ fn worker_set(app: AppHandle, enabled: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn worker_open_logs(app: AppHandle) {
-    let folder = shell(&app).worker.logs();
+    let folder = shell(&app).worker.env().logs();
     open_folder(&app, folder);
 }
 
@@ -389,7 +408,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 std::thread::spawn(move || {
                     if let Some(state) = handle.try_state::<Shell>() {
                         if state.server.settings().local_worker {
-                            state.worker.start(Arc::clone(&state.server));
+                            state.worker.start(Some(local_connection(Arc::clone(&state.server))));
                         }
                     }
                 });
@@ -402,6 +421,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         uv: paths.resources.join("uv").join(if cfg!(windows) { "uv.exe" } else { "uv" }),
         ffmpeg_dir: paths.resources.join("ffmpeg"),
         language: texts.lang.server_code().into(),
+        config_dir: "config".into(),
     };
     let worker_notify = {
         let worker_item = worker_item.clone();
@@ -410,7 +430,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             let _ = worker_item.set_text(texts.worker_status(phase));
         })
     };
-    let worker = LocalWorker::new(worker_env, Arc::clone(&logger), worker_notify);
+    let worker = WorkerManager::new(worker_env, Arc::clone(&logger), worker_notify);
     let server = Server::new(paths, settings, Arc::clone(&texts), Arc::clone(&logger), notify);
     let state = Shell {
         server: Arc::clone(&server),

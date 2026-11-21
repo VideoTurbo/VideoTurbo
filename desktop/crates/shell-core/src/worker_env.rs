@@ -32,6 +32,9 @@ pub struct WorkerEnv {
     pub ffmpeg_dir: PathBuf,
     /// 子进程的界面语言（zh-Hans / en）。
     pub language: String,
+    /// 配置文件夹：主程序的本机识别用 `config`，识别机应用用 `config-worker`。
+    /// 两者共用同一套环境和模型，各自连自己的主程序。
+    pub config_dir: String,
 }
 
 /// 安装过程中的事件。
@@ -75,7 +78,7 @@ fn python_in(venv: &Path) -> PathBuf {
 
 impl WorkerEnv {
     pub fn config_file(&self) -> PathBuf {
-        self.root.join("config").join("worker.yaml")
+        self.root.join(&self.config_dir).join("worker.yaml")
     }
     pub fn logs(&self) -> PathBuf {
         self.root.join("logs")
@@ -83,8 +86,15 @@ impl WorkerEnv {
     pub fn install_log(&self) -> PathBuf {
         self.logs().join("install.log")
     }
+    /// 识别程序日志的文件名前缀：本机识别是 worker，识别机应用是 worker-standalone。
+    fn log_stem(&self) -> String {
+        match self.config_dir.strip_prefix("config-") {
+            Some(_) => "worker-standalone".into(),
+            None => "worker".into(),
+        }
+    }
     pub fn worker_log(&self) -> PathBuf {
-        self.logs().join("worker.log")
+        self.logs().join(format!("{}.log", self.log_stem()))
     }
     fn python_dir(&self) -> PathBuf {
         self.root.join("python")
@@ -119,20 +129,18 @@ impl WorkerEnv {
         self.installed_version().is_none() || self.installed_version() != self.bundle_version()
     }
 
+    /// 配置文件里的顶层字段（server_url、worker_token）；没有或为空时返回 None。
+    pub fn config_value(&self, key: &str) -> Option<String> {
+        let text = std::fs::read_to_string(self.config_file()).ok()?;
+        text.lines().find_map(|line| {
+            let value = line.strip_prefix(key)?.strip_prefix(':')?.trim();
+            let value = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')).unwrap_or(value);
+            (!matches!(value, "" | "null" | "~")).then(|| value.to_string())
+        })
+    }
+
     pub fn configured(&self) -> bool {
-        std::fs::read_to_string(self.config_file())
-            .map(|text| {
-                let filled = |key: &str| {
-                    text.lines().any(|line| {
-                        line.strip_prefix(key)
-                            .and_then(|rest| rest.strip_prefix(':'))
-                            .map(|value| !matches!(value.trim().trim_matches('"'), "" | "null" | "~"))
-                            .unwrap_or(false)
-                    })
-                };
-                filled("server_url") && filled("worker_token")
-            })
-            .unwrap_or(false)
+        self.config_value("server_url").is_some() && self.config_value("worker_token").is_some()
     }
 
     /// 所有子进程共用的环境变量。
@@ -279,6 +287,8 @@ impl WorkerEnv {
             self.root.clone().into(),
             "--bundle".into(),
             self.bundle.clone().into(),
+            "--config-dir".into(),
+            self.config_dir.clone().into(),
             "--server-url".into(),
             connection.server_url.clone().into(),
             "--token".into(),
@@ -306,7 +316,7 @@ impl WorkerEnv {
             ],
             &[],
         );
-        spec.output = self.logs().join("worker-console.log");
+        spec.output = self.logs().join(format!("{}-console.log", self.log_stem()));
         spec
     }
 
@@ -329,6 +339,19 @@ impl WorkerEnv {
     }
 }
 
+/// Windows 上是否装了 NVIDIA 驱动（没有时只能用 CPU，很慢）；其他系统返回 None。
+pub fn has_nvidia() -> Option<bool> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let system = std::env::var_os("SystemRoot")
+        .map(|root| PathBuf::from(root).join("System32").join("nvidia-smi.exe"));
+    let in_path = std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("nvidia-smi.exe").is_file()))
+        .unwrap_or(false);
+    Some(in_path || system.map(|path| path.is_file()).unwrap_or(false))
+}
+
 impl InstallError {
     pub fn message(&self) -> String {
         match self {
@@ -349,6 +372,7 @@ mod tests {
             uv: "uv".into(),
             ffmpeg_dir: "/ffmpeg".into(),
             language: "zh-Hans".into(),
+            config_dir: "config".into(),
         }
     }
 

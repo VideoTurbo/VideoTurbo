@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VideoTurbo Worker</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    main { padding: 20px 24px; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    header img { width: 44px; height: 44px; }
+    header h1 { font-size: 17px; margin: 0; }
+    header p { margin: 0; font-size: 12.5px; color: var(--muted); }
+    section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+    h2 { font-size: 14px; margin: 0 0 8px; }
+    ol { padding-left: 18px; margin: 0 0 10px; font-size: 13px; }
+    textarea { font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; width: 100%; min-height: 64px; resize: vertical;
+               color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+    .help { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+    .warn { color: var(--bad); font-size: 12.5px; margin: 8px 0 0; }
+    .state { font-weight: 600; }
+    .server { font-size: 12.5px; color: var(--muted); margin-top: 4px; word-break: break-all; }
+    .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 10px 0 6px; }
+    .bar div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+    .line { font: 11.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 16px; }
+    pre { white-space: pre-wrap; word-break: break-all; max-height: 140px; overflow: auto; font-size: 11.5px;
+          background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 8px 0 0; }
+    .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; flex-wrap: wrap; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="logo.png" alt="">
+      <div><h1>VideoTurbo Worker</h1><p id="t-sub"></p></div>
+    </header>
+
+    <section id="setup" hidden>
+      <h2 id="t-setup"></h2>
+      <ol><li id="t-step1"></li><li id="t-step2"></li></ol>
+      <textarea id="code" spellcheck="false"></textarea>
+      <p class="warn" id="code-error" hidden></p>
+      <p class="help" id="t-download"></p>
+      <div class="actions">
+        <button id="cancel-change" hidden></button>
+        <button class="primary" id="connect"></button>
+      </div>
+    </section>
+
+    <section id="status" hidden>
+      <div class="state" id="state"></div>
+      <div class="server" id="server"></div>
+      <div id="progress" hidden>
+        <div class="bar"><div id="bar"></div></div>
+        <div class="line" id="step"></div>
+      </div>
+      <div class="line" id="line"></div>
+      <p class="help" id="hint"></p>
+      <pre id="detail" hidden></pre>
+      <div class="actions">
+        <button id="tools" hidden></button>
+        <button id="retry" hidden></button>
+        <button id="pause"></button>
+        <button id="change"></button>
+        <button id="logs"></button>
+      </div>
+    </section>
+    <p class="warn" id="gpu" hidden></p>
+  </main>
+  <script>
+    const zh = (navigator.language || '').toLowerCase().startsWith('zh')
+    const T = zh ? {
+      sub: '让这台显卡电脑为 VideoTurbo 识别字幕', setup: '连接主程序',
+      step1: '在 VideoTurbo 控制台打开“云主机 → 添加显卡电脑”，复制接入串。', step2: '粘贴到下面，点“连接”。',
+      download: '连接后会下载运行环境（约 2 GB）和识别模型（约 4 GB），之后不用再下载。与桌面、游戏共用显卡时，只在显卡空闲时接单。',
+      connect: '连接', cancel: '取消', placeholder: 'VT1:…',
+      off: '已暂停接单', waiting: '正在连接主程序…', installing: '正在安装运行环境', selfTest: '正在下载识别模型并自检（第一次需要较长时间）',
+      running: '运行中：有识别任务时会自动处理', failed: '出错了', needTools: '需要先安装 Apple 的命令行开发工具（含 Git）',
+      conflict: '这台电脑上 VideoTurbo 主程序应用的“本机识别”正在使用显卡，它停下后会自动接手',
+      needToolsHint: '点“安装命令行工具”，按提示装好后点“重试”。',
+      server: '主程序：{url}', tools: '安装命令行工具', retry: '重试', pause: '暂停接单', resume: '继续接单', change: '更换主程序', logs: '打开日志文件夹',
+      noGpu: '没有检测到 NVIDIA 显卡，识别会用 CPU，速度很慢。请先安装 NVIDIA 驱动。', macCpu: 'Mac 上识别使用 CPU，速度比 NVIDIA 显卡慢很多。',
+    } : {
+      sub: 'Let this GPU computer recognize subtitles for VideoTurbo', setup: 'Connect to the main app',
+      step1: 'In the VideoTurbo console, open Cloud hosts → Add GPU computer and copy the connection code.', step2: 'Paste it below and click Connect.',
+      download: 'After connecting, the program environment (about 2 GB) and models (about 4 GB) are downloaded once. When the GPU is shared with your desktop or games, jobs are only taken while it is idle.',
+      connect: 'Connect', cancel: 'Cancel', placeholder: 'VT1:…',
+      off: 'Paused', waiting: 'Connecting to the main app…', installing: 'Installing the program environment', selfTest: 'Downloading models and running the self-test (the first time takes a while)',
+      running: 'Running: jobs are processed automatically', failed: 'Something went wrong', needTools: "Apple's command line developer tools (including Git) are needed",
+      conflict: 'Local recognition in the VideoTurbo main app on this computer is using the GPU; this takes over when it stops',
+      needToolsHint: 'Click "Install command line tools", follow the prompts, then click "Retry".',
+      server: 'Main app: {url}', tools: 'Install command line tools', retry: 'Retry', pause: 'Pause', resume: 'Resume', change: 'Change main app', logs: 'Open logs folder',
+      noGpu: 'No NVIDIA GPU detected; recognition will use the CPU and be very slow. Install the NVIDIA driver first.', macCpu: 'On a Mac, recognition uses the CPU and is much slower than an NVIDIA GPU.',
+    }
+    const { invoke } = window.__TAURI__.core
+    const $ = (id) => document.getElementById(id)
+    const texts = { 't-sub': T.sub, 't-setup': T.setup, 't-step1': T.step1, 't-step2': T.step2, 't-download': T.download,
+      connect: T.connect, 'cancel-change': T.cancel, tools: T.tools, retry: T.retry, change: T.change, logs: T.logs }
+    for (const [id, text] of Object.entries(texts)) $(id).textContent = text
+    $('code').placeholder = T.placeholder
+    let changing = false
+    let view = null
+
+    $('connect').onclick = async () => {
+      $('code-error').hidden = true
+      try {
+        await invoke('connect', { code: $('code').value })
+        changing = false
+        $('code').value = ''
+        refresh()
+      } catch (error) {
+        $('code-error').textContent = String(error)
+        $('code-error').hidden = false
+      }
+    }
+    $('change').onclick = () => { changing = true; render(view) }
+    $('cancel-change').onclick = () => { changing = false; render(view) }
+    $('pause').onclick = () => invoke('pause', { paused: !view.paused }).then(refresh)
+    $('retry').onclick = () => invoke('retry').then(refresh)
+    $('tools').onclick = () => invoke('install_tools')
+    $('logs').onclick = () => invoke('open_logs')
+
+    function render(v) {
+      if (!v) return
+      const setup = !v.configured || changing
+      $('setup').hidden = !setup
+      $('status').hidden = setup
+      $('cancel-change').hidden = !v.configured
+      const gpu = v.platform === 'macos' ? T.macCpu : v.nvidia === false ? T.noGpu : ''
+      $('gpu').textContent = gpu
+      $('gpu').hidden = !gpu
+      if (setup) return
+      const labels = { off: T.off, waiting: T.waiting, installing: T.installing, self_test: T.selfTest, running: T.running,
+                       failed: T.failed, need_tools: T.needTools, conflict: T.conflict }
+      $('state').textContent = v.paused ? T.off : (labels[v.phase] || v.phase)
+      $('server').textContent = v.server_url ? T.server.replace('{url}', v.server_url) : ''
+      const installing = v.phase === 'installing'
+      $('progress').hidden = !installing
+      if (installing) {
+        $('bar').style.width = `${Math.round(((v.index - 1) / Math.max(v.total, 1)) * 100)}%`
+        $('step').textContent = `${v.index}/${v.total} ${zh ? v.zh : v.en}`
+      }
+      $('line').textContent = v.line || ''
+      $('hint').textContent = v.phase === 'need_tools' ? T.needToolsHint : v.phase === 'failed' ? v.message : ''
+      $('detail').textContent = v.detail || ''
+      $('detail').hidden = !v.detail
+      $('tools').hidden = v.phase !== 'need_tools'
+      $('retry').hidden = !(v.phase === 'failed' || v.phase === 'need_tools')
+      $('pause').textContent = v.paused ? T.resume : T.pause
+    }
+
+    async function refresh() {
+      try { view = await invoke('state'); render(view) } catch (error) { console.error(error) }
+    }
+    refresh()
+    setInterval(refresh, 700)
+  </script>
+</body>
+</html>

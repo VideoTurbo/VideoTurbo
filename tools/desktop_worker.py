@@ -4,7 +4,8 @@
 源码目录（--bundle）就是安装包里的 worker-bundle（与开云机时推送的部署包相同）。运行环境放在 --root 下，
 布局与源码部署一致（Worker 按 config 文件夹的上一级找 .venv-whisperjav、models、cache）::
 
-    <root>/config/worker.yaml   服务配置
+    <root>/config/worker.yaml   服务配置（--config-dir 可换文件夹：主程序的本机识别用 config，
+                                识别机应用用 config-worker，两者共用同一套环境和模型）
     <root>/.venv                识别程序
     <root>/.venv-whisperjav     默认识别模式的独立环境
     <root>/models、cache、logs
@@ -65,9 +66,10 @@ def emit(event: str, **fields: object) -> None:
 
 
 class Layout:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, config_dir: str = "config") -> None:
         self.root = root
-        self.config = root / "config" / "worker.yaml"
+        # Worker 按配置文件夹的上一级找 .venv-whisperjav、models、cache，所以配置文件夹只能放在 root 下一层。
+        self.config = root / config_dir / "worker.yaml"
         self.venv = root / ".venv"
         self.backend = root / ".venv-whisperjav"
         self.mingit = root / "mingit"
@@ -186,7 +188,7 @@ def install(args: argparse.Namespace) -> None:
 
 def configure(args: argparse.Namespace) -> None:
     """写 config/worker.yaml：新建时从模板复制，已有时只改地址、密钥和模型目录。"""
-    layout = Layout(args.root)
+    layout = Layout(args.root, args.config_dir)
     if args.connection:
         decoded = configure_worker.decode_connection(args.connection)
         if decoded is None:
@@ -214,7 +216,7 @@ def configure(args: argparse.Namespace) -> None:
 
 
 def status(args: argparse.Namespace) -> None:
-    layout = Layout(args.root)
+    layout = Layout(args.root, args.config_dir)
     state = read_state(layout)
     values = configure_worker.read_values(layout.config.read_text(encoding="utf-8")) if layout.config.is_file() else {}
     installed = bool(state) and Layout.python(layout.venv).is_file() and Layout.python(layout.backend).is_file()
@@ -240,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     config = commands.add_parser("configure", help="写入主程序地址和接入密钥")
     config.add_argument("--root", type=Path, required=True)
     config.add_argument("--bundle", type=Path, required=True)
+    config.add_argument("--config-dir", default="config", choices=["config", "config-worker"])
     source = config.add_mutually_exclusive_group(required=True)
     source.add_argument("--connection", help="控制台“添加显卡电脑”给出的接入串")
     source.add_argument("--server-url")
@@ -249,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
     state = commands.add_parser("status", help="以 JSON 输出安装和配置状态")
     state.add_argument("--root", type=Path, required=True)
     state.add_argument("--bundle", type=Path)
+    state.add_argument("--config-dir", default="config", choices=["config", "config-worker"])
     args = parser.parse_args(argv)
     if args.command == "configure" and args.server_url and not args.token:
         parser.error("--server-url 需要同时给出 --token")
