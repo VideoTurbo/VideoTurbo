@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // 媒体服务器或通知的配置列表：可以添加多份，各自启用、测试、编辑。操作立即保存，不计入“未保存的更改”。
 // 所有配置共用的插件设置在“插件”页的插件卡片上设置。
-import { NButton, NInput, NModal, NSelect, NSwitch } from 'naive-ui'
-import { computed, onActivated, onMounted, reactive, ref } from 'vue'
+import { NButton, NInput, NModal, NSelect, NSwitch, type SelectOption } from 'naive-ui'
+import { computed, h, onActivated, onMounted, reactive, ref } from 'vue'
 import { api, errorMessage, type ConnectionKind, type NoticeMinLevel, type PluginConnection, type PluginType } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import FormField from '@/components/FormField.vue'
@@ -52,7 +52,15 @@ const result = ref<{ ok: boolean; text: string } | null>(null)
 const busy = ref(false)
 
 const schema = computed(() => types.value.find((item) => item.id === form.type) || null)
-const typeOptions = computed(() => types.value.map((item) => ({ value: item.id, label: item.label })))
+const typeOptions = computed(() => types.value.map((item) => ({ value: item.id, label: item.label, icon: item.icon })))
+/** 类型下拉框的选项前显示图标。 */
+function renderTypeLabel(option: SelectOption) {
+  const icon = typeof option.icon === 'string' ? option.icon : ''
+  return h('span', { class: 'select-icon-label' }, [
+    icon ? h('img', { src: icon, alt: '' }) : null,
+    String(option.label ?? ''),
+  ])
+}
 /** 密钥类字段已保存过时不回显，留空表示不修改。 */
 const saved = computed(() => savedSecrets(schema.value?.fields || [], existing.value?.values))
 
@@ -163,6 +171,10 @@ function statusText(item: PluginConnection): string {
     <div v-else class="cloud-provider-list">
       <div v-for="item in items" :key="item.id" class="cloud-provider">
         <div class="cloud-provider-head wide">
+          <span class="plugin-icon">
+            <img v-if="item.type_icon" :src="item.type_icon" alt="">
+            <span v-else>{{ (item.type_label || item.type).slice(0, 1).toUpperCase() }}</span>
+          </span>
           <div class="cloud-provider-title">
             <b>{{ item.name }}</b>
             <span class="cloud-provider-subtitle">{{ item.type_label }}<template v-if="item.summary"> · {{ item.summary }}</template><template v-if="item.min_level"> · {{ levelOptions.find((option) => option.value === item.min_level)?.label }}</template></span>
@@ -181,7 +193,7 @@ function statusText(item: PluginConnection): string {
 
     <NModal :show="!!editing" preset="card" class="modal-card" :title="existing ? t('settings.connections.editTitle', { noun }) : t('settings.connections.addTitle', { noun })" @update:show="editing = null">
       <FormField :label="t('settings.connections.type')">
-        <NSelect :value="form.type" :options="typeOptions" :disabled="!!existing" @update:value="changeType" />
+        <NSelect :value="form.type" :options="typeOptions" :render-label="renderTypeLabel" :disabled="!!existing" @update:value="changeType" />
         <span v-if="schema" class="cloud-provider-subtitle">{{ schema.description }}<template v-if="schema.homepage"> · <a :href="schema.homepage" target="_blank" rel="noopener noreferrer">{{ hostOf(schema.homepage) }}</a></template></span>
       </FormField>
       <FormField :label="t('compute.providers.name')" required><NInput v-model:value="form.name" maxlength="100" :placeholder="nouns[kind].example" /></FormField>

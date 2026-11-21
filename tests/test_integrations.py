@@ -487,6 +487,7 @@ def test_connection_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         assert duplicate.status_code == 400 and "名称已存在" in render(duplicate.json()["detail"])
         listed = client.get("/api/media-servers").json()
         assert listed[0]["summary"] == "http://emby:8096" and listed[0]["available"] is True
+        assert listed[0]["type_icon"].startswith("data:image/svg+xml;base64,")
         # 密钥不回显。
         assert listed[0]["values"]["api_key"] == "••••••"
         assert "emby-secret" not in json.dumps(listed)

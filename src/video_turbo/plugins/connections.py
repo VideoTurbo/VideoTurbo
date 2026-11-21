@@ -15,7 +15,7 @@ from typing import Any
 from ..database import Database
 from ..i18n import msg
 from . import registry
-from .base import PluginConfigError, PluginInfo, masked_values
+from .base import PluginConfigError, PluginInfo, icon_uri, masked_values
 
 ID_PREFIX = {"media_server": "ms-", "notifier": "nt-"}
 # 通知配置的默认最低级别：警告和错误。
@@ -52,6 +52,7 @@ class Connections:
                 "id": connection_id,
                 "type": record.get("type", ""),
                 "type_label": plugin.label if plugin else record.get("type", ""),
+                "type_icon": icon_uri(plugin.icon) if plugin else "",
                 "name": record.get("name", ""),
                 "enabled": bool(record.get("enabled", True)),
                 "available": plugin is not None,
