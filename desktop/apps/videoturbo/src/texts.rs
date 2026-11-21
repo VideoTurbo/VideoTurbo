@@ -48,6 +48,34 @@ impl Texts {
     pub fn restart(&self) -> &'static str {
         self.pick("重新启动主程序", "Restart main app")
     }
+    pub fn local_worker(&self) -> &'static str {
+        self.pick("本机识别…", "Local recognition…")
+    }
+    pub fn local_worker_title(&self) -> &'static str {
+        self.pick("VideoTurbo 本机识别", "VideoTurbo Local Recognition")
+    }
+    pub fn worker_status(&self, phase: &crate::local_worker::WorkerPhase) -> String {
+        use crate::local_worker::WorkerPhase as P;
+        let text = match phase {
+            P::Off => self.pick("本机识别：未开启", "Local recognition: off"),
+            P::Waiting => self.pick("本机识别：正在连接…", "Local recognition: connecting…"),
+            P::Installing { index, total, .. } => {
+                return match self.lang {
+                    Lang::Zh => format!("本机识别：正在安装（{index}/{total}）…"),
+                    Lang::En => format!("Local recognition: installing ({index}/{total})…"),
+                }
+            }
+            P::NeedTools => {
+                self.pick("本机识别：需要安装命令行工具", "Local recognition: command line tools needed")
+            }
+            P::SelfTest { .. } => {
+                self.pick("本机识别：正在下载模型并自检…", "Local recognition: downloading models…")
+            }
+            P::Running => self.pick("本机识别：运行中", "Local recognition: running"),
+            P::Failed { .. } => self.pick("本机识别：出错了", "Local recognition: error"),
+        };
+        text.to_string()
+    }
     pub fn quit(&self) -> &'static str {
         self.pick("退出 VideoTurbo", "Quit VideoTurbo")
     }

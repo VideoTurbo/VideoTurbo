@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::connection::Connection;
-use crate::process::{self, Spec};
+use crate::process::{self, Cancel, Spec};
 
 const PROGRESS: &str = "@@VT ";
 /// 官方源（GitHub）下载 Python 失败时依次尝试的镜像。
@@ -161,7 +161,11 @@ impl WorkerEnv {
     }
 
     /// 找到 uv 管理的 Python 3.11，没有就下载（官方源失败时换镜像）。
-    fn ensure_python(&self, on_event: &mut impl FnMut(Event)) -> Result<PathBuf, InstallError> {
+    fn ensure_python(
+        &self,
+        cancel: &Cancel,
+        on_event: &mut impl FnMut(Event),
+    ) -> Result<PathBuf, InstallError> {
         let find = || -> Option<PathBuf> {
             let mut found = None;
             let spec = self.spec(self.uv.clone(), vec!["python".into(), "find".into(), "3.11".into()], &[]);
@@ -183,7 +187,8 @@ impl WorkerEnv {
                 mirror.map(|m| vec![("UV_PYTHON_INSTALL_MIRROR", m)]).unwrap_or_default();
             let spec =
                 self.spec(self.uv.clone(), vec!["python".into(), "install".into(), "3.11".into()], &extra);
-            match process::run_lines(&spec, |line| on_event(Event::Log(line.to_string()))) {
+            match process::run_lines_cancellable(&spec, cancel, |line| on_event(Event::Log(line.to_string())))
+            {
                 Ok(status) if status.success() => {
                     if let Some(path) = find() {
                         return Ok(path);
@@ -204,27 +209,31 @@ impl WorkerEnv {
         &self,
         python: &Path,
         args: Vec<OsString>,
+        cancel: &Cancel,
         on_event: &mut impl FnMut(Event),
     ) -> Result<(), InstallError> {
         let mut full = vec![self.script().into_os_string()];
         full.extend(args);
         let spec = self.spec(python.to_path_buf(), full, &[]);
         let mut error = None;
-        let status = process::run_lines(&spec, |line| match line.strip_prefix(PROGRESS) {
-            Some(json) => match serde_json::from_str::<Message>(json) {
-                Ok(Message::Step { index, total, zh, en }) => on_event(Event::Step { index, total, zh, en }),
-                Ok(Message::Error { code, message }) => {
-                    error = Some(if code == "need_clt" {
-                        InstallError::NeedCommandLineTools
-                    } else {
-                        InstallError::Failed(message)
-                    })
-                }
-                Ok(Message::Done | Message::Configured) | Err(_) => {}
-            },
-            None => on_event(Event::Log(line.to_string())),
-        })
-        .map_err(|error| InstallError::Failed(error.to_string()))?;
+        let status =
+            process::run_lines_cancellable(&spec, cancel, |line| match line.strip_prefix(PROGRESS) {
+                Some(json) => match serde_json::from_str::<Message>(json) {
+                    Ok(Message::Step { index, total, zh, en }) => {
+                        on_event(Event::Step { index, total, zh, en })
+                    }
+                    Ok(Message::Error { code, message }) => {
+                        error = Some(if code == "need_clt" {
+                            InstallError::NeedCommandLineTools
+                        } else {
+                            InstallError::Failed(message)
+                        })
+                    }
+                    Ok(Message::Done | Message::Configured) | Err(_) => {}
+                },
+                None => on_event(Event::Log(line.to_string())),
+            })
+            .map_err(|error| InstallError::Failed(error.to_string()))?;
         match error {
             Some(error) => Err(error),
             None if status.success() => Ok(()),
@@ -233,9 +242,14 @@ impl WorkerEnv {
     }
 
     /// 安装或升级运行环境。`device` 是 auto（有 NVIDIA 显卡时用显卡）或 cpu。
-    pub fn install(&self, device: &str, mut on_event: impl FnMut(Event)) -> Result<(), InstallError> {
+    pub fn install(
+        &self,
+        device: &str,
+        cancel: &Cancel,
+        mut on_event: impl FnMut(Event),
+    ) -> Result<(), InstallError> {
         std::fs::create_dir_all(self.logs()).map_err(|error| InstallError::Failed(error.to_string()))?;
-        let python = self.ensure_python(&mut on_event)?;
+        let python = self.ensure_python(cancel, &mut on_event)?;
         let args: Vec<OsString> = vec![
             "install".into(),
             "--root".into(),
@@ -251,13 +265,14 @@ impl WorkerEnv {
             "--device".into(),
             device.into(),
         ];
-        self.run_script(&python, args, &mut on_event)
+        self.run_script(&python, args, cancel, &mut on_event)
     }
 
     /// 写入主程序地址和接入密钥。`shared_machine`：新建配置时开启空闲检测（与桌面、游戏共用显卡）。
     pub fn configure(&self, connection: &Connection, shared_machine: bool) -> Result<(), InstallError> {
         let python = self.venv_python();
-        let python = if python.is_file() { python } else { self.ensure_python(&mut |_| {})? };
+        let cancel = Cancel::default();
+        let python = if python.is_file() { python } else { self.ensure_python(&cancel, &mut |_| {})? };
         let mut args: Vec<OsString> = vec![
             "configure".into(),
             "--root".into(),
@@ -272,7 +287,7 @@ impl WorkerEnv {
         if shared_machine {
             args.push("--shared-machine".into());
         }
-        self.run_script(&python, args, &mut |_| {})
+        self.run_script(&python, args, &cancel, &mut |_| {})
     }
 
     /// 启动识别程序；它自己写日志，标准输出只留作排查。

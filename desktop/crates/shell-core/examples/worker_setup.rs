@@ -30,7 +30,7 @@ fn main() {
             let connection = shell_core::connection::parse(value).expect("接入串无效");
             env.configure(&connection, true)
         }
-        "install" => env.install(value, |event| match event {
+        "install" => env.install(value, &shell_core::process::Cancel::default(), |event| match event {
             Event::Step { index, total, zh, .. } => println!("[{index}/{total}] {zh}"),
             Event::Log(line) => println!("    {line}"),
         }),
