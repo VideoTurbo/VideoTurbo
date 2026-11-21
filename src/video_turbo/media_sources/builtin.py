@@ -15,6 +15,7 @@ from .loader import PluginLoadError
 # {插件 id: (模块, 类名)}，与 plugins.registry 中媒体库来源的内置列表一致。
 BUILTIN_SOURCES: dict[str, tuple[str, str]] = {
     "webdav": (".webdav", "WebDavSource"),
+    "smb": (".smb", "SmbSource"),
 }
 
 

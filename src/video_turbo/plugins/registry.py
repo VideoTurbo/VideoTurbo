@@ -21,6 +21,7 @@ from ..media_servers.emby import EmbyServer, JellyfinServer
 from ..media_servers.fnos import FnosServer
 from ..media_servers.plex import PlexServer
 from ..media_sources import base as source_base
+from ..media_sources.smb import SmbSource
 from ..media_sources.webdav import WebDavSource
 from ..notifiers import base as notifier_base
 from ..notifiers.webhook import WebhookNotifier
@@ -78,7 +79,7 @@ KINDS: dict[str, PluginKind] = {
             source_base.PLUGIN_API_MIN_VERSION,
             "video_turbo.media_sources",
             # 本地文件夹是内置来源（media_sources.local），不是插件。
-            (WebDavSource,),
+            (WebDavSource, SmbSource),
         ),
         PluginKind(
             "notifier",

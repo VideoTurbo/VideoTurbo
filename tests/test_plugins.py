@@ -512,6 +512,7 @@ def test_plugin_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         assert [(item["id"], item["source"]) for item in builtin] == [
             ("ssh", "builtin"),
             ("webdav", "builtin"),
+            ("smb", "builtin"),
             ("webhook", "builtin"),
         ]
         assert all(item["icon"].startswith("data:image/svg+xml;base64,") for item in builtin)

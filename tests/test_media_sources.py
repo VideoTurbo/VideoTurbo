@@ -476,7 +476,7 @@ def test_network_storage_library_scans_and_relays_media(tmp_path: Path, monkeypa
         # WebDAV 是内置插件，列在插件页；按多份配置在“网络存储”里添加。
         plugins = {item["id"]: item for item in client.get("/api/plugins").json()["plugins"]}
         assert plugins["webdav"]["source"] == "builtin"
-        assert [item["id"] for item in client.get("/api/media-sources/types").json()] == ["webdav"]
+        assert [item["id"] for item in client.get("/api/media-sources/types").json()] == ["webdav", "smb"]
         tested = client.post("/api/media-sources/types/webdav/test", json={"values": values}).json()
         assert render(tested["message"]) == "连接成功：根目录下有 1 项。"
         bad = client.post("/api/media-sources/types/webdav/test", json={"values": {**values, "password": "x"}})

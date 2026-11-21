@@ -31,6 +31,10 @@ hiddenimports = [
     ),
     *collect_submodules("uvicorn"),
     *collect_submodules("asyncssh"),
+    # 内置 Samba 来源在用到时才导入 smbclient；spnego 按认证方式动态加载模块。
+    *collect_submodules("smbclient"),
+    *collect_submodules("smbprotocol"),
+    *collect_submodules("spnego"),
 ]
 
 a = Analysis(  # noqa: F821
