@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-worker-models-download"
+description = "Enables the worker_models_download command without any pre-configured scope."
+commands.allow = ["worker_models_download"]
+
+[[permission]]
+identifier = "deny-worker-models-download"
+description = "Denies the worker_models_download command without any pre-configured scope."
+commands.deny = ["worker_models_download"]

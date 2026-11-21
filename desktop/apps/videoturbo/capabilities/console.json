@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "console",
+  "description": "主窗口里的控制台（主程序提供的网页）：只能设置窗口主题，以及在自绘标题栏下拖动、缩放、最小化和关闭（隐藏）窗口。",
+  "windows": ["main"],
+  "remote": { "urls": ["http://127.0.0.1:*"] },
+  "permissions": [
+    "allow-set-theme",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized"
+  ]
+}

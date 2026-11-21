@@ -32,4 +32,13 @@ input[type="number"], input[type="text"] {
   border-radius: 8px; padding: 6px 10px; width: 100%;
 }
 .muted { color: var(--muted); }
+/* 主窗口没有系统标题栏（macOS 透明、Windows 自绘）：页面顶端一条可拖动窗口。 */
+.drag { display: none; }
+:root[data-titlebar="overlay"] .drag, :root[data-titlebar="custom"] .drag { display: block; position: fixed; top: 0; left: 0; right: 0; height: 52px; }
+/* Windows 主窗口没有系统标题栏：右上角的窗口按钮，样式与控制台顶栏一致。 */
+.window-controls { position: fixed; top: 0; right: 0; height: 52px; display: flex; z-index: 1; }
+.window-controls button { width: 46px; border: 0; border-radius: 0; padding: 0; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: default; }
+.window-controls button:hover { background: rgba(128, 128, 128, 0.14); color: var(--text); }
+.window-controls button.close:hover { background: #c42b1c; color: #fff; }
+.window-controls svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; shape-rendering: crispEdges; }
 .bad { color: var(--bad); }

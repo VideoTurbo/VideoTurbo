@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-worker-models-refresh"
+description = "Enables the worker_models_refresh command without any pre-configured scope."
+commands.allow = ["worker_models_refresh"]
+
+[[permission]]
+identifier = "deny-worker-models-refresh"
+description = "Denies the worker_models_refresh command without any pre-configured scope."
+commands.deny = ["worker_models_refresh"]

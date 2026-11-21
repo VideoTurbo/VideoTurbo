@@ -1,7 +1,33 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "外壳自己的页面（启动页、设置）。控制台是主程序提供的网页，不在这里，拿不到外壳的接口。",
+  "description": "外壳自己的页面（启动页、设置、本机识别、显卡提示）。控制台是主程序提供的网页，权限另见 console.json。",
   "windows": ["main", "settings", "worker", "gpu"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized",
+    "dialog:allow-open",
+    "allow-server-state",
+    "allow-restart-server",
+    "allow-open-logs",
+    "allow-get-settings",
+    "allow-save-settings",
+    "allow-worker-state",
+    "allow-worker-set",
+    "allow-worker-open-logs",
+    "allow-worker-install-tools",
+    "allow-worker-download",
+    "allow-worker-models-download",
+    "allow-worker-model-delete",
+    "allow-worker-models-refresh",
+    "allow-worker-model-choices",
+    "allow-worker-model-select",
+    "allow-gpu-prompt",
+    "allow-gpu-choose"
+  ]
 }

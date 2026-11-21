@@ -77,6 +77,19 @@ details.more p{margin-top:8px;padding:10px 12px;border-radius:8px;background:var
 /* ---- 顶部栏 ---- */
 .topbar{position:sticky;top:0;z-index:30;background:var(--topbar);backdrop-filter:saturate(1.6) blur(16px);-webkit-backdrop-filter:saturate(1.6) blur(16px);border-bottom:1px solid var(--line)}
 .topbar-inner{max-width:1440px;margin:auto;height:52px;padding:0 20px;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:16px}
+/* 桌面版 macOS 的透明标题栏：左上角留给窗口按钮（外壳把它们摆在顶栏中线上）。窗口宽于 1440px 时顶栏居中，自然留出空间。 */
+:root[data-titlebar="overlay"] .topbar-inner{padding-left:max(20px,calc(92px - max(0px,(100vw - 1440px) / 2)))}
+:root[data-titlebar="custom"] .topbar-inner{padding-right:max(20px,calc(158px - max(0px,(100vw - 1440px) / 2)))}
+/* 桌面版 Windows 的窗口按钮：贴在窗口右上角，尺寸、悬停色仿照系统标题栏。 */
+.window-controls{position:absolute;top:0;right:0;bottom:0;display:flex}
+.window-controls button{width:46px;border:0;padding:0;background:transparent;color:var(--text-2);display:grid;place-items:center;cursor:default;transition:background-color .1s}
+.window-controls button:hover{background:var(--neutral-soft);color:var(--text)}
+.window-controls button:active{background:var(--track)}
+.window-controls button.close:hover{background:#c42b1c;color:#fff}
+.window-controls button.close:active{background:#b3271c;color:#fff}
+.window-controls svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:1;shape-rendering:crispEdges}
+.theme-option{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:96px}
+.theme-option .i{width:14px;height:14px;color:var(--accent)}
 .brand{display:flex;align-items:center;gap:9px;justify-self:start;text-decoration:none}
 .brand img{display:block;width:22px;height:22px;border-radius:6px}
 .brand h1{font-size:14px;line-height:1.2}
