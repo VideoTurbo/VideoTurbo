@@ -25,10 +25,17 @@ from ..models import WhisperJavProgress
 from ..naming import job_dir as cache_job_dir
 from ..protocol import PROTOCOL_HEADER, PROTOCOL_MISMATCH_STATUS, WORKER_PROTOCOL_VERSION
 from ..security import sha256_file
+from . import model_catalog
 from .asr import Transcriber, TranscriptionCancelled
 from .config import WorkerConfig, load_worker_config
 from .errors import describe_asr_failure
-from .gpu import configure_cuda_dll_paths, query_gpu, select_device
+from .gpu import (
+    configure_cuda_dll_paths,
+    cuda_runtime_ready,
+    query_gpu,
+    select_device,
+    torch_lib_dir,
+)
 from .gpu_lock import GpuLock
 from .jasna import self_test as jasna_self_test
 from .restore_pipeline import RestorePipeline
@@ -123,6 +130,11 @@ class Worker:
                     modes.insert(0, "whisperjav")
             except (OSError, ValueError, KeyError):
                 pass
+        if self.config.asr.local_models_only:
+            downloaded, _ = model_catalog.supported_modes(self.config)
+            if not cuda_runtime_ready(torch_lib_dir(python)):
+                downloaded.discard("faster_whisper")
+            modes = [mode for mode in modes if mode in downloaded]
         return modes
 
     def _query_hardware(self):
@@ -135,6 +147,8 @@ class Worker:
         if python and "whisperjav" in self.supported_asr_modes():
             try:
                 marker = json.loads(self._whisperjav_marker().read_text())
+                if self.config.asr.local_models_only and not model_catalog.supported_modes(self.config)[1]:
+                    return False
                 return marker.get("ensemble") is True
             except (OSError, ValueError):
                 pass
@@ -603,6 +617,8 @@ class Worker:
 async def _async_main(args: argparse.Namespace) -> None:
     configure_cuda_dll_paths()
     config = load_worker_config(args.config)
+    # 桌面版不单独安装 cuBLAS/cuDNN：faster-whisper 用 WhisperJAV 环境里 PyTorch 自带的。
+    configure_cuda_dll_paths(torch_lib_dir(config.whisperjav.python_executable))
     role = args.role
     if args.self_test:
         role = "restore" if args.restore else "asr"
@@ -625,14 +641,20 @@ async def _async_main(args: argparse.Namespace) -> None:
                 gpu.device_type,
                 gpu.memory_total_mb,
             )
-            worker._select_transcriber(args.asr_mode)
-            if args.asr_mode == "whisperjav":
-                await asyncio.to_thread(
-                    worker.transcriber.self_test, worker.cancel_requested.is_set
-                )
-            else:
-                await asyncio.to_thread(worker.transcriber.load)
-            logger.info("%s 识别后端自检通过。", args.asr_mode)
+            modes = worker.supported_asr_modes() if args.asr_mode == "downloaded" else [args.asr_mode]
+            if not modes:
+                raise RuntimeError(msg("worker.noDownloadedModels"))
+            for mode in modes:
+                worker._select_transcriber(mode)
+                if mode == "whisperjav":
+                    # 桌面版没下载第二遍模型时只检查第一遍。
+                    worker.transcriber.ensemble = worker.supports_whisperjav_ensemble() or not config.asr.local_models_only
+                    await asyncio.to_thread(
+                        worker.transcriber.self_test, worker.cancel_requested.is_set
+                    )
+                else:
+                    await asyncio.to_thread(worker.transcriber.load)
+                logger.info("%s 识别后端自检通过。", mode)
             return
         await worker.run(once=args.once)
     finally:
@@ -657,9 +679,9 @@ def main() -> None:
     parser.add_argument("--self-test", action="store_true", help="检查所选设备和模型加载")
     parser.add_argument(
         "--asr-mode",
-        choices=["whisperjav", "faster_whisper"],
+        choices=["whisperjav", "faster_whisper", "downloaded"],
         default="whisperjav",
-        help="自检的识别模式（默认 WhisperJAV）",
+        help="自检的识别模式（默认 WhisperJAV）；downloaded：模型已下载的所有模式（桌面版，不下载模型）",
     )
     parser.add_argument("--restore", action="store_true", help="与 --self-test 一起使用：自检 Jasna 影片修复")
     restore_model = parser.add_mutually_exclusive_group()

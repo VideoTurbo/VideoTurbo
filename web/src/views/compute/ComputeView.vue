@@ -12,6 +12,7 @@ import CloudBindDialog from './CloudBindDialog.vue'
 import CloudInstances from './CloudInstances.vue'
 import CloudProvidersDialog from './CloudProvidersDialog.vue'
 import AddWorkerDialog from './AddWorkerDialog.vue'
+import LocalWorkerCard from './LocalWorkerCard.vue'
 import { addWorkerOpen, openLaunch, providersOpen } from './dialogs'
 import LaunchDialog from './LaunchDialog.vue'
 import LaunchLogDialog from './LaunchLogDialog.vue'
@@ -22,6 +23,13 @@ import { t } from '@/i18n'
 const machineView = useViewMode('machines')
 const workers = computed(() => status.value?.workers || [])
 const machines = computed(() => groupMachines(workers.value, heartbeatTimeout.value))
+/** 桌面版：本机识别还没跑起来（等待下载、安装中、出错）时单独显示进度；跑起来后本机出现在列表里。 */
+const localWorker = computed(() => {
+  const local = status.value?.local_worker
+  if (!local || local.phase === 'off') return null
+  // 识别程序在运行时，只有当前识别模式缺模型才显示。
+  return local.phase !== 'running' || local.missing?.length ? local : null
+})
 /** 没有可创建云主机的平台（含 SSH 机器）时，禁用“创建云主机”。 */
 const canLaunch = computed(() => !!cloud.value?.launch_providers.length)
 const providerCount = computed(() => (cloud.value?.providers_configured ? cloud.value.launch_providers.length : 0))
@@ -29,7 +37,7 @@ const providerCount = computed(() => (cloud.value?.providers_configured ? cloud.
 const summary = computed(() => {
   if (!status.value) return t('common.loading')
   const list = machines.value
-  if (!list.length) return t('compute.noMachines')
+  if (!list.length) return localWorker.value && localWorker.value.phase !== 'running' ? t('compute.local.summary') : t('compute.noMachines')
   const busy = list.reduce((total, machine) => total + machine.busyCount, 0)
   const restoring = workers.value.filter((w) => w.task_kind === 'restore' && w.current_job_id && workerOnline(w, heartbeatTimeout.value)).length
   return t('compute.summary', { count: list.length, online: list.filter((machine) => machine.onlineCount).length })
@@ -68,6 +76,7 @@ onActivated(() => {
       <span class="spacer" />
       <ViewToggle v-if="machines.length" v-model="machineView" />
     </div>
+    <LocalWorkerCard v-if="localWorker" :worker="localWorker" />
     <div v-if="machines.length && machineView === 'list'" class="card table-wrap">
       <table class="jobs-table compute-table">
         <thead>
@@ -78,7 +87,7 @@ onActivated(() => {
     </div>
     <div v-else class="worker-grid">
       <WorkerCard v-for="machine in machines" :key="machine.key" :machine="machine" />
-      <div v-if="!machines.length" class="empty">{{ t('compute.noMachines') }}</div>
+      <div v-if="!machines.length && !localWorker" class="empty">{{ t('compute.noMachines') }}</div>
     </div>
 
     <div class="cloud-area">

@@ -1,0 +1,13 @@
+[package]
+name = "shell-tauri"
+version = "0.1.0"
+description = "VideoTurbo 桌面版两个应用共用、依赖 Tauri 的部分（自动更新）"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+shell-core = { path = "../shell-core" }
+tauri = { version = "2.12", features = ["tray-icon"] }
+tauri-plugin-updater = "2.14"

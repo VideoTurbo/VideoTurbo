@@ -2,6 +2,8 @@
 # 识别机应用（VideoTurbo Worker）只出 Windows 版。
 # PyInstaller 不能跨平台打包，每个平台在各自的 runner 上构建。改动桌面版或主程序代码的 PR 都会构建一次，
 # 产物作为 artifact 上传，可下载试用。暂不做代码签名：macOS 只做 ad-hoc 签名，Windows 不签名。
+# 发布流程（release.yml）以 release: true 调用：用 TAURI_SIGNING_PRIVATE_KEY 给自动更新包签名，
+# 额外生成 .sig 和 macOS 的 .app.tar.gz（desktop/apps/updater.conf.json）。
 name: 桌面版
 
 on:
@@ -16,6 +18,16 @@ on:
       - ".github/workflows/desktop.yml"
   workflow_dispatch:
   workflow_call:
+    inputs:
+      release:
+        description: 发布构建：生成并签名自动更新包
+        type: boolean
+        default: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
 
 permissions:
   contents: read
@@ -29,11 +41,16 @@ jobs:
           - os: windows-latest
             bundle: nsis
           - os: macos-latest
-            bundle: dmg
+            # app 是自动更新包（.app.tar.gz）的来源。
+            bundle: app,dmg
     runs-on: ${{ matrix.os }}
     env:
       # 打包脚本输出中文；Windows 控制台默认代码页不是 UTF-8。
       PYTHONUTF8: "1"
+      # 只有发布构建带私钥并生成更新包；PR 构建不需要。
+      TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.release && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+      UPDATER_CONFIG: ${{ inputs.release && '--config ../updater.conf.json' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -64,25 +81,33 @@ jobs:
         run: uv run python deploy/desktop/build_sidecar.py
       - name: 外壳代码检查与单元测试
         working-directory: desktop
+        # 两个应用的 Tauri 构建脚本会把安装包资源（主程序、识别程序部署包等）复制到 target 目录。
+        # 同时运行多个构建脚本（--all-targets 的不同配置、两个应用）时，Windows 上会因文件被占用而失败；
+        # 先并行编译依赖，再用 -j 1 逐个编译两个应用。
         run: |
           cargo fmt --check
-          cargo clippy --all-targets --locked -- -D warnings
-          cargo test --locked
+          cargo clippy --all-targets --locked -p shell-core -p shell-tauri -- -D warnings
+          cargo clippy --all-targets --locked -j 1 -- -D warnings
+          cargo test --locked --no-run -p shell-core -p shell-tauri
+          cargo test --locked -j 1
       - name: 安装 Tauri 命令行工具
         working-directory: desktop
         run: npm ci
       - name: 构建安装包
         working-directory: desktop/apps/videoturbo
-        run: npx --prefix ../.. tauri build --bundles ${{ matrix.bundle }}
+        run: npx --prefix ../.. tauri build --bundles ${{ matrix.bundle }} ${{ env.UPDATER_CONFIG }}
       # 独立的识别机应用只出 Windows 版。
       - name: 构建识别机安装包
         if: runner.os == 'Windows'
         working-directory: desktop/apps/worker
-        run: npx --prefix ../.. tauri build --bundles nsis
+        run: npx --prefix ../.. tauri build --bundles nsis ${{ env.UPDATER_CONFIG }}
       - uses: actions/upload-artifact@v7
         with:
-          name: VideoTurbo-${{ matrix.bundle }}
+          name: VideoTurbo-${{ runner.os }}
           path: |
             desktop/target/release/bundle/nsis/*.exe
+            desktop/target/release/bundle/nsis/*.exe.sig
             desktop/target/release/bundle/dmg/*.dmg
+            desktop/target/release/bundle/macos/*.app.tar.gz
+            desktop/target/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error

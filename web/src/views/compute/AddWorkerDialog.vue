@@ -5,6 +5,7 @@ import { computed, ref, watch } from 'vue'
 import { api, errorMessage } from '@/api'
 import AppIcon from '@/components/AppIcon.vue'
 import { toast } from '@/lib/feedback'
+import { isDesktop } from '@/stores/status'
 import { addWorkerOpen } from './dialogs'
 import { t } from '@/i18n'
 
@@ -16,6 +17,8 @@ const code = ref('')
 const error = ref('')
 const loading = ref(false)
 let request = 0
+/** 打开弹窗时自己生成一次；这期间地址变化不再触发生成。 */
+let opening = false
 
 const options = computed(() => urls.value.map((value) => ({ label: value, value })))
 
@@ -23,19 +26,28 @@ watch(addWorkerOpen, async (open) => {
   if (!open) return
   code.value = ''
   error.value = ''
+  opening = true
   try {
     const info = await api.workerConnection()
     // 浏览器打开控制台用的地址，其他电脑多半也能访问；桌面版在本机打开时是 127.0.0.1，改用网卡地址。
     const hosts = [location.hostname, ...info.addresses].filter((host) => host && !LOOPBACK.has(host))
     urls.value = [...new Set(hosts.map((host) => `http://${host.includes(':') ? `[${host}]` : host}:${info.worker_port}`))]
+    // 再次打开时地址和上次一样，watch(url) 不会触发，所以这里直接生成。
     url.value = urls.value[0] ?? null
-    if (!url.value) error.value = t('compute.addWorker.noAddress')
+    if (url.value) void generate(url.value)
+    else error.value = t('compute.addWorker.noAddress')
   } catch (cause) {
     error.value = errorMessage(cause)
+  } finally {
+    opening = false
   }
 })
 
-watch(url, async (value) => {
+watch(url, (value) => {
+  if (!opening) void generate(value)
+})
+
+async function generate(value: string | null): Promise<void> {
   code.value = ''
   if (!value) return
   const current = ++request
@@ -51,7 +63,7 @@ watch(url, async (value) => {
   } finally {
     if (current === request) loading.value = false
   }
-})
+}
 
 async function copy(): Promise<void> {
   try {
@@ -72,6 +84,7 @@ async function copy(): Promise<void> {
       <li>{{ t('compute.addWorker.step1') }}</li>
       <li>{{ t('compute.addWorker.step2') }}</li>
     </ol>
+    <p v-if="isDesktop" class="field-help" style="margin: -6px 0 14px">{{ t('compute.addWorker.localHint') }}</p>
     <label class="field-label">{{ t('compute.addWorker.address') }}</label>
     <NSelect v-model:value="url" :options="options" filterable tag :placeholder="t('compute.addWorker.addressPlaceholder')" />
     <span class="field-help">{{ t('compute.addWorker.addressHelp') }}</span>
