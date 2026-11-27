@@ -4,7 +4,7 @@
   const zh = (navigator.language || '').toLowerCase().startsWith('zh')
   const T = zh ? {
     title: '识别模型', mode: '当前识别模式：', unknown: '未知（连不上主程序）', cached: '（上次读到的）',
-    whisperjav2: 'WhisperJAV 双遍', whisperjav1: 'WhisperJAV 单遍', faster: 'faster-whisper',
+    whisperjav2: 'WhisperJAV 双遍', whisperjav1: 'WhisperJAV 单遍',
     needed: '当前模式需要', downloaded: '已下载', remove: '删除', confirm: '确认删除', use: '改用',
     download: '下载所选', none: '没有要下载的模型', busy: '正在下载或自检，完成后再操作',
     missing: '当前识别模式需要的模型还没下载：{names}。下载之前，这台电脑不接这个模式的任务。',
@@ -12,7 +12,7 @@
     assumed: '（还没读到主程序的识别模式，先按默认模式勾选）',
   } : {
     title: 'Recognition models', mode: 'Current recognition mode: ', unknown: "unknown (can't reach the main app)", cached: ' (last known)',
-    whisperjav2: 'WhisperJAV two-pass', whisperjav1: 'WhisperJAV single-pass', faster: 'faster-whisper',
+    whisperjav2: 'WhisperJAV two-pass', whisperjav1: 'WhisperJAV single-pass',
     needed: 'Needed now', downloaded: 'Downloaded', remove: 'Delete', confirm: 'Confirm delete', use: 'Use',
     download: 'Download selected', none: 'Nothing selected', busy: 'Downloading or testing; try again when it finishes',
     missing: "Models the current recognition mode needs aren't downloaded: {names}. This computer won't take jobs in this mode until they are.",
@@ -27,7 +27,7 @@
 
   function modeName(mode, picker) {
     if (!mode) return picker ? T.whisperjav2 + T.assumed : T.unknown
-    const name = mode.mode === 'whisperjav' ? (mode.whisperjav_ensemble ? T.whisperjav2 : T.whisperjav1) : mode.mode === 'faster_whisper' ? T.faster : mode.mode
+    const name = mode.mode === 'whisperjav' ? (mode.whisperjav_ensemble ? T.whisperjav2 : T.whisperjav1) : mode.mode
     return name + (mode.live ? '' : T.cached)
   }
 

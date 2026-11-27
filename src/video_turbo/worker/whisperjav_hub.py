@@ -91,7 +91,7 @@ def patch_hub_downloads() -> None:
 
     Replace the pinned upstream wrapper factory too: the CLI installs its own
     patch later, and must reuse these wrappers rather than nesting retries.
-    Also works in the Faster-Whisper environment without WhisperJAV installed.
+    The model catalog also runs this without WhisperJAV installed.
     """
     import huggingface_hub
 

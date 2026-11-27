@@ -123,9 +123,9 @@ def _register(db: Database, name: str, **extra) -> None:
             version="0.0.0",
             gpu_name="RTX 5090",
             memory_total_mb=32000,
-            model="large-v3",
+            model="Qwen/Qwen3-ASR-1.7B",
             compute_type="float16",
-            supported_asr_modes=["whisperjav", "faster_whisper"],
+            supported_asr_modes=["whisperjav"],
             supports_whisperjav_ensemble=True,
             **extra,
         )

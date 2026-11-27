@@ -38,7 +38,7 @@ class SourceKind(StrEnum):
     NONE = "none"
 
 
-AsrMode = Literal["whisperjav", "faster_whisper"]
+AsrMode = Literal["whisperjav"]
 DeviceType = Literal["cuda", "mps", "cpu"]
 
 

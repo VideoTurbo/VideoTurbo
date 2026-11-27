@@ -10,7 +10,7 @@ export type ListView = 'all' | 'active' | 'failed' | 'pending' | 'completed'
 export type JobAction =
   | 'start' | 'skip' | 'pause' | 'resume' | 'cancel' | 'retry' | 'priority' | 'complete' | 'reprocess' | 'download'
 
-export type AsrMode = 'whisperjav' | 'faster_whisper'
+export type AsrMode = 'whisperjav'
 
 export interface WhisperjavPass {
   pass_number: number
@@ -107,7 +107,7 @@ export interface JobFile {
 export interface JobDetail extends Job {
   created_at: string
   asr_metadata?: {
-    asr_engine?: AsrMode
+    asr_engine?: string
     model?: string
     passes?: { model: string }[]
     ensemble?: boolean

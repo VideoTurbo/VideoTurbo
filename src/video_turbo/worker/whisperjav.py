@@ -193,9 +193,15 @@ class WhisperJavTranscriber:
 
     def _environment(self, offline: bool = False) -> dict[str, str]:
         env = dict(os.environ)
-        # Do not leak the faster-whisper environment's native libraries/import paths.
+        # Do not leak the parent process's native libraries/import paths.
         for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "LD_LIBRARY_PATH"):
             env.pop(key, None)
+        python = self.config.whisperjav.python_executable
+        if os.name == "nt" and python and self.device == "cuda":
+            # WhisperJAV 子进程可从自己的 PyTorch 安装加载 CUDA DLL。
+            torch_lib = python.parent.parent / "Lib" / "site-packages" / "torch" / "lib"
+            if torch_lib.is_dir():
+                env["PATH"] = os.pathsep.join((str(torch_lib), env.get("PATH", "")))
         env["CUDA_VISIBLE_DEVICES"] = str(self.config.device_index) if self.device == "cuda" else ""
         env["PYTHONUTF8"] = "1"
         env["PYTHONUNBUFFERED"] = "1"

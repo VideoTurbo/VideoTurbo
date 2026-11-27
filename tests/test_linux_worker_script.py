@@ -36,9 +36,6 @@ from pathlib import Path
 root = Path(__file__).parent
 args = sys.argv[1:]
 if args and args[0] in ("-c", "-"):
-    if args[0] == "-c" and "nvidia_runtime_library_paths" in args[1]:
-        print("/test/cuda")
-        sys.exit(0)
     os.execv(sys.executable, [sys.executable, *args])
 if args[:2] == ["-m", "pip"]:
     with open(root / "pip.log", "a") as log:
@@ -171,7 +168,7 @@ def test_asr_start_runs_self_test_once_and_manages_instances(deployment):
         assert worker["args"][:2] == ["--role", "asr"]
         assert worker["suffix"] == f"0{index}"  # 名称 = 硬件机器标识 + 后缀，由 Worker 自己拼接
         assert worker["count"] == "2"
-        assert worker["library_path"].startswith("/test/cuda")
+        assert worker["library_path"] == os.environ.get("LD_LIBRARY_PATH")
         assert (root / f"logs/worker.5090-0{index}.log").is_file()
     status = run("status")
     assert "字幕识别服务：2 路运行中" in render(status.stdout)
@@ -705,9 +702,7 @@ def test_shared_template_defaults_to_dedicated_accurate_mode() -> None:
     assert "name" not in payload
     assert config.device == "auto"
     assert config.idle.enabled is False
-    assert config.asr.model == "large-v3"
-    assert config.asr.compute_type == "float16"
-    assert config.asr.chunk_seconds == 300
+    assert config.whisperjav.model == "Qwen/Qwen3-ASR-1.7B"
     assert config.asr.download_root == Path("../models")
     assert config.jasna.enabled is False
 
@@ -718,5 +713,5 @@ def test_script_is_strict_and_executable() -> None:
     assert script.stat().st_mode & 0o111
     text = script.read_text(encoding="utf-8")
     assert "set -euo pipefail" in text
-    assert "HF_HUB_DISABLE_XET" in text and "nvidia_runtime_library_paths" in text
+    assert "HF_HUB_DISABLE_XET" in text and "nvidia_runtime_library_paths" not in text
     assert sorted(path.name for path in (PROJECT / "deploy/worker/linux").iterdir()) == ["worker.sh"]

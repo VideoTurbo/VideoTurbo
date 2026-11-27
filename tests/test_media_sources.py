@@ -281,7 +281,7 @@ def test_cloud_library_scans_through_plugin_and_gpu_fetches_media(
 
         registration = {
             "name": "gpu", "version": "0", "gpu_name": "test", "memory_total_mb": 1, "model": "m",
-            "compute_type": "f", "supported_asr_modes": ["whisperjav", "faster_whisper"],
+            "compute_type": "f", "supported_asr_modes": ["whisperjav"],
             "supports_whisperjav_ensemble": True,
         }
         # 没有 ffmpeg 的 GPU 机器不领取网盘任务。

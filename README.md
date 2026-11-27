@@ -32,15 +32,16 @@ docker compose up -d
 浏览器打开 `http://主程序的IP:8765` 设置管理口令。之后的首次设置、显卡电脑安装、常见问题和更新方法见
 **[官网文档](https://videoturbo.github.io/guide/introduction/)**。
 
+Linux NVIDIA 字幕使用与 Jasna 对齐的 PyTorch 2.12.1 和 CUDA 13.0，需要 580 系列或更高版本的驱动。WhisperJAV 单遍使用 Qwen3-ASR，日语双遍增加 anime-whisper。
+
 ## 参与贡献
 
 欢迎提交 Issue 和 PR，开发环境和提交规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，安全漏洞请按 [SECURITY.md](SECURITY.md) 私密报告。
 
 ## 致谢
 
-- [WhisperJAV](https://github.com/meizhong986/WhisperJAV)：默认识别模式的识别流程。
+- [WhisperJAV](https://github.com/meizhong986/WhisperJAV)：字幕识别流程。
 - [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)、[anime-whisper](https://huggingface.co/litagin/anime-whisper)：语音识别模型。
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)：Faster-Whisper 模式。
 - [Jasna](https://github.com/Kruk2/jasna)：影片修复。
 - FFmpeg、FastAPI、Vue、Naive UI 等开源项目。
 

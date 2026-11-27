@@ -40,7 +40,7 @@ export const asrModes = (worker: Worker): AsrMode[] => worker.supported_asr_mode
 export function supportsAsr(worker: Worker, settings: AsrSettings | undefined): boolean {
   const mode = settings?.mode || 'whisperjav'
   if (!asrModes(worker).includes(mode)) return false
-  const needsEnsemble = mode !== 'faster_whisper' && settings?.whisperjav_ensemble
+  const needsEnsemble = settings?.whisperjav_ensemble
   return !needsEnsemble || worker.supports_whisperjav_ensemble === true
 }
 

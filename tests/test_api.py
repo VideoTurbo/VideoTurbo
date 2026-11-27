@@ -159,9 +159,9 @@ def test_health_status_and_worker_auth(tmp_path: Path, monkeypatch) -> None:
             "gpu_name": "RTX 4070 Ti",
             "driver_version": "595.97",
             "memory_total_mb": 12282,
-            "model": "large-v3",
+            "model": "Qwen/Qwen3-ASR-1.7B",
             "compute_type": "float16",
-            "supported_asr_modes": ["faster_whisper"],
+            "supported_asr_modes": ["whisperjav"],
         }
         assert client.post("/api/workers/register", json=payload).status_code == 401
         response = client.post(

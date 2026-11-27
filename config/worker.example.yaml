@@ -35,41 +35,14 @@ idle:
   # 空闲检查间隔（秒）。
   check_interval_seconds: 20
 
-# Faster-Whisper 模式的设置。识别模式由主程序控制台“设置”统一选择，默认 WhisperJAV。
 asr:
-  # 12 GB 及以上显存推荐 large-v3；8 GB 显存改用 large-v3-turbo。
-  model: large-v3
-  # 12 GB 及以上显存用 float16；8 GB 显存改用 int8_float16。CPU 会自动使用 int8。
-  compute_type: float16
-  # 搜索宽度，5 是速度和质量的折中。
-  beam_size: 5
-  # 长影片默认关闭 VAD，避免语音压缩后的时间戳恢复异常。
-  vad_filter: false
-  # 连续静音达到此长度（毫秒）时切开语音段。
-  vad_min_silence_duration_ms: 500
-  # 关闭跨段文本条件，可减少长视频中的重复、时间轴漂移和幻觉循环。
-  condition_on_previous_text: false
-  # 对长静音附近的疑似幻觉启用抑制；设为 null 可关闭。
-  hallucination_silence_threshold: 2.0
-  # 按词级时间戳二次切分，每条字幕最长秒数。
+  # WhisperJAV 语音分段的时长上限（秒）。
   max_cue_duration_seconds: 6.0
-  # 单条字幕最多字符数。
-  max_cue_chars: 28
-  # 尽量让一条字幕至少包含这些字符，避免一句话被切成一两个字；完整短句除外。
-  min_cue_chars: 6
-  # 相邻词之间达到此静音秒数时切分字幕。
-  max_word_gap_seconds: 0.8
-  # 短字幕在不超过此停顿时自动与相邻字幕合并。
-  merge_short_cue_gap_seconds: 1.5
-  # 长影片按此时长（秒）分块识别，避免整片时间轴一起退化。
-  chunk_seconds: 300
-  # 某个块时间轴异常时，改用更小的固定块重试。
-  retry_chunk_seconds: 30
   # 模型缓存目录，相对于本配置文件。云主机建议改到关机后不会清空的数据盘，
   # 云主机或项目目录重建后可继续复用模型；Linux 安装脚本会询问该目录。
   download_root: ../models
 
-# WhisperJAV 模式的设置；两种模式使用独立的模型与依赖。
+# WhisperJAV 单遍和双遍共用的设置。
 whisperjav:
   # null 自动定位项目根目录 .venv-whisperjav 中的 Python。
   python_executable: null

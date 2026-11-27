@@ -1,7 +1,7 @@
 """从 uv.lock 导出显卡电脑安装用的依赖清单（精确版本 + 哈希），提交在 deploy/worker/requirements/。
 
 显卡电脑上没有 uv，安装脚本用 ``pip install --require-hashes -r <清单>`` 安装，与 CI 测试的版本一致。
-清单带平台标记（例如 Windows 与 Linux 的 CUDA 库版本不同），一份清单适用于所有平台。
+清单带平台标记，一份清单适用于所有平台。WhisperJAV 的推理依赖由独立安装脚本管理。
 
 修改依赖（pyproject.toml / uv.lock）后运行：
 

@@ -27,7 +27,7 @@ def test_saved_asr_settings_inherit_only_missing_yaml_fields(
 ) -> None:
     database = Database(tmp_path / "app.db")
     database.initialize()
-    defaults = AsrSettings(mode="faster_whisper", whisperjav_ensemble=yaml_default)
+    defaults = AsrSettings(mode="whisperjav", whisperjav_ensemble=yaml_default)
     assert database.asr_settings(defaults) == defaults
     with database.connect() as conn:
         conn.execute(
@@ -118,9 +118,9 @@ def test_delete_worker_preserves_history_and_blocks_active_asr(tmp_path: Path) -
             version="0.0.0",
             gpu_name="RTX 4090",
             memory_total_mb=24564,
-            model="large-v3",
+            model="Qwen/Qwen3-ASR-1.7B",
             compute_type="float16",
-            supported_asr_modes=["faster_whisper"],
+            supported_asr_modes=["whisperjav"],
         )
     )
     movie = tmp_path / "movie.mkv"
@@ -166,7 +166,7 @@ def test_delete_offline_workers_only_removes_long_offline_idle_workers(tmp_path:
     for name in ("fresh", "stale", "stale-busy"):
         database.register_worker(
             WorkerRegistration(
-                name=name, version="0.0.0", gpu_name="RTX 4090", memory_total_mb=24564, model="large-v3", compute_type="float16", supported_asr_modes=["faster_whisper"]
+                name=name, version="0.0.0", gpu_name="RTX 4090", memory_total_mb=24564, model="Qwen/Qwen3-ASR-1.7B", compute_type="float16", supported_asr_modes=["whisperjav"]
             )
         )
     movie = tmp_path / "movie.mkv"
@@ -1240,12 +1240,12 @@ def test_close_leaves_connections_in_use_to_their_thread(tmp_path: Path) -> None
 def test_model_setting_fills_missing_fields_and_ignores_bad_data(tmp_path: Path) -> None:
     database = Database(tmp_path / "app.db")
     database.initialize()
-    defaults = AsrSettings(mode="faster_whisper")
+    defaults = AsrSettings(mode="whisperjav")
     assert database.asr_settings(defaults) == defaults
 
     # 只保存了部分字段：其余字段用调用方给的默认值补齐。
     database.set_runtime_json("asr", {"whisperjav_ensemble": False})
-    assert database.asr_settings(defaults).mode == "faster_whisper"
+    assert database.asr_settings(defaults).mode == "whisperjav"
     assert database.asr_settings(defaults).whisperjav_ensemble is False
 
     # 坏数据（不是 JSON、类型不对、不符合模型）都回到默认值，不阻止主程序启动。

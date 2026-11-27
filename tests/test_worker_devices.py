@@ -3,7 +3,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 from conftest import raises_rendered
@@ -12,7 +12,6 @@ from video_turbo.database import Database
 from video_turbo.models import WorkerHeartbeat, WorkerRegistration
 from video_turbo.worker import gpu
 from video_turbo.worker import whisperjav as whisperjav_module
-from video_turbo.worker.asr import Transcriber
 from video_turbo.worker.config import WorkerConfig
 from video_turbo.worker.whisperjav import WhisperJavTranscriber
 
@@ -66,32 +65,6 @@ def test_missing_nvidia_falls_back_to_cpu(monkeypatch):
     assert gpu.query_gpu().device_type == "cpu"
 
 
-@pytest.mark.parametrize("device,compute", [("cpu", "int8"), ("cuda", "float16")])
-def test_faster_whisper_uses_supported_precision(monkeypatch, device, compute):
-    calls = []
-    package = ModuleType("faster_whisper")
-
-    def model(path, **kwargs):
-        calls.append(kwargs)
-        return SimpleNamespace(feature_extractor=SimpleNamespace(sampling_rate=16000))
-
-    package.WhisperModel = model
-    audio = ModuleType("faster_whisper.audio")
-    audio.decode_audio = lambda *_args, **_kwargs: None
-    monkeypatch.setitem(sys.modules, "faster_whisper", package)
-    monkeypatch.setitem(sys.modules, "faster_whisper.audio", audio)
-    monkeypatch.setattr(
-        "video_turbo.worker.asr._download_model_with_progress", lambda *_args: "cached-model"
-    )
-    monkeypatch.setattr(
-        "video_turbo.worker.asr.query_gpu", lambda *_args: SimpleNamespace(device_type=device)
-    )
-    transcriber = Transcriber(WorkerConfig())
-    transcriber.load()
-    assert calls[0]["device"] == device
-    assert calls[0]["compute_type"] == compute
-
-
 def test_qwen_mps_request_uses_explicit_cpu_flags_and_float32(tmp_path, monkeypatch):
     config = WorkerConfig(device="mps", whisperjav={"python_executable": sys.executable})
     monkeypatch.setattr(
@@ -136,8 +109,8 @@ def test_cpu_worker_device_is_preserved_in_database(tmp_path):
             gpu_name="Mac",
             device_type="cpu",
             memory_total_mb=16000,
-            model="large-v3",
-            compute_type="int8", supported_asr_modes=["faster_whisper"],
+            model="Qwen/Qwen3-ASR-1.7B",
+            compute_type="float32", supported_asr_modes=["whisperjav"],
         )
     )
     db.heartbeat_worker("mac-01", WorkerHeartbeat(asr_device="cpu"))
@@ -157,7 +130,7 @@ def test_mac_installer_uses_native_pytorch_index(monkeypatch):
         "https://pypi.tuna.tsinghua.edu.cn/simple"
     )
     assert module.torch_packages("Linux", "cpu", True)[-1].endswith("/cpu")
-    assert module.torch_packages("Linux", "auto", True)[-1].endswith("/cu128")
+    assert module.torch_packages("Linux", "auto", True)[-1].endswith("/cu130")
 
 
 def load_installer(name="cuda_installer"):
@@ -183,8 +156,8 @@ def load_installer(name="cuda_installer"):
 def test_torch_cuda_index_follows_host_driver(monkeypatch, gpus, expected):
     module = load_installer()
     monkeypatch.delenv("VIDEO_TURBO_TORCH_CUDA", raising=False)
-    assert module.select_cuda_index(gpus)[0] == expected
-    assert module.torch_packages("Linux", "auto", True, expected)[-1].endswith("/" + expected)
+    assert module.select_cuda_index(gpus, "Windows")[0] == expected
+    assert module.torch_packages("Windows", "auto", True, expected)[-1].endswith("/" + expected)
 
 
 @pytest.mark.parametrize(
@@ -199,16 +172,31 @@ def test_torch_cuda_index_rejects_unsupported_drivers(monkeypatch, gpus, message
     module = load_installer()
     monkeypatch.delenv("VIDEO_TURBO_TORCH_CUDA", raising=False)
     with raises_rendered(SystemExit, message):
-        module.select_cuda_index(gpus)
+        module.select_cuda_index(gpus, "Windows")
 
 
 def test_torch_cuda_index_can_be_overridden(monkeypatch):
     module = load_installer()
     monkeypatch.setenv("VIDEO_TURBO_TORCH_CUDA", "CU126")
-    assert module.select_cuda_index([("575.51", "12.0")])[0] == "cu126"
+    assert module.select_cuda_index([("575.51", "12.0")], "Windows")[0] == "cu126"
     monkeypatch.setenv("VIDEO_TURBO_TORCH_CUDA", "cu124")
     with raises_rendered(SystemExit, "VIDEO_TURBO_TORCH_CUDA"):
-        module.select_cuda_index([])
+        module.select_cuda_index([], "Windows")
+
+
+def test_linux_cuda_uses_jasna_versions_and_requires_compatible_driver(monkeypatch):
+    installer = load_installer()
+    monkeypatch.delenv("VIDEO_TURBO_TORCH_CUDA", raising=False)
+    assert installer.select_cuda_index([("580.65.06", "8.6")], "Linux")[0] == "cu130"
+    pins = installer.torch_packages("Linux", "cuda", True)
+    assert {"torch==2.12.1+cu130", "torchvision==0.27.1+cu130",
+            "torchaudio==2.11.0+cu130", "torchcodec==0.14.0+cu130"} <= set(pins)
+    for gpus in ([], [("575.51", "12.0")]):
+        with pytest.raises(SystemExit, match="580"):
+            installer.select_cuda_index(gpus, "Linux")
+    monkeypatch.setenv("VIDEO_TURBO_TORCH_CUDA", "cu128")
+    with pytest.raises(SystemExit, match="cu130"):
+        installer.select_cuda_index([("580.65.06", "8.6")], "Linux")
 
 
 def test_query_nvidia_gpus_falls_back_without_compute_cap(monkeypatch):
@@ -229,14 +217,14 @@ def test_check_cuda_only_reports_selection(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["install_whisperjav.py", "--check-cuda"])
     monkeypatch.setattr(module.platform, "system", lambda: "Linux")
     monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/" + name)
-    monkeypatch.setattr(module, "query_nvidia_gpus", lambda: [("550.54.15", "8.6")])
+    monkeypatch.setattr(module, "query_nvidia_gpus", lambda: [("580.65.06", "8.6")])
 
     def forbidden(*args, **kwargs):
         raise AssertionError("--check-cuda 不应执行安装命令")
 
     monkeypatch.setattr(module.subprocess, "run", forbidden)
     module.main()
-    assert "cu126" in capsys.readouterr().out
+    assert "cu130" in capsys.readouterr().out
 
 
 def test_installer_repairs_existing_environment_without_pip(tmp_path, monkeypatch):
@@ -250,7 +238,7 @@ def test_installer_repairs_existing_environment_without_pip(tmp_path, monkeypatc
     executable.touch()
     monkeypatch.setattr(sys, "argv", [str(path), "--venv", str(venv)])
     monkeypatch.setattr(module.shutil, "which", lambda name: str(tmp_path / name))
-    monkeypatch.setattr(module, "query_nvidia_gpus", lambda: [("575.51", "8.6")])
+    monkeypatch.setattr(module, "query_nvidia_gpus", lambda: [("580.65.06", "8.6")])
     calls = []
     repaired = False
 
@@ -281,7 +269,7 @@ def test_linux_installer_checks_native_runtime_before_installing_packages(tmp_pa
     monkeypatch.setattr(sys, "argv", [str(path), "--venv", str(venv)])
     monkeypatch.setattr(module.platform, "system", lambda: "Linux")
     monkeypatch.setattr(module.shutil, "which", lambda name: "/usr/bin/" + name)
-    monkeypatch.setattr(module, "query_nvidia_gpus", lambda: [("575.51", "8.6")])
+    monkeypatch.setattr(module, "query_nvidia_gpus", lambda: [("580.65.06", "8.6")])
     monkeypatch.setenv("LD_LIBRARY_PATH", "/cloud/image/lib")
     calls = []
 

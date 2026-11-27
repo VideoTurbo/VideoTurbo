@@ -41,7 +41,7 @@ def _repos(config: WorkerConfig) -> dict[str, list[model_catalog.Repo]]:
 def test_each_recognition_mode_needs_its_own_models() -> None:
     assert model_catalog.needed("whisperjav", True) == ["qwen3-asr", "anime-whisper"]
     assert model_catalog.needed("whisperjav", False) == ["qwen3-asr"]
-    assert model_catalog.needed("faster_whisper", False) == ["faster-whisper"]
+    assert model_catalog.needed("faster_whisper", False) == []
     assert model_catalog.needed(None, False) == []
 
 
@@ -53,11 +53,8 @@ def test_catalog_uses_the_caches_recognition_reads(tmp_path: Path) -> None:
         ("Qwen/Qwen3-ASR-1.7B", hub), ("FireRedTeam/FireRedVAD", hub),
     ]
     assert [(repo.repo_id, repo.cache) for repo in repos["anime-whisper"]] == [("litagin/anime-whisper", hub)]
-    whisper = repos["faster-whisper"][0]
-    assert (whisper.repo_id, whisper.cache) == ("Systran/faster-whisper-large-v3", tmp_path / "models")
-    assert "model.bin" in whisper.patterns
     sizes = {model.id: model.size_mb() for model in model_catalog.catalog(config)}
-    assert sizes == {"qwen3-asr": 4492, "anime-whisper": 2887, "faster-whisper": 2948}
+    assert sizes == {"qwen3-asr": 4492, "anime-whisper": 2887}
 
 
 @pytest.mark.skipif(not hasattr(Path, "symlink_to"), reason="需要符号链接")
@@ -83,7 +80,7 @@ def test_status_marks_what_the_current_mode_still_needs(tmp_path: Path) -> None:
     # 连不上主程序、也没有缓存：不知道当前模式，什么都不算“需要”。
     result = model_catalog.status(config, config_file)
     assert result["mode"] is None and result["missing"] == []
-    assert [item["downloaded"] for item in result["models"]] == [True, False, False]
+    assert [item["downloaded"] for item in result["models"]] == [True, False]
 
     (config_file.parent / model_catalog.MODE_FILE).write_text(json.dumps({"mode": "whisperjav", "whisperjav_ensemble": True}))
     result = model_catalog.status(config, config_file)
@@ -95,10 +92,10 @@ def test_status_marks_what_the_current_mode_still_needs(tmp_path: Path) -> None:
 def test_mode_is_read_from_the_main_app_and_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     prepare_server(tmp_path, monkeypatch, worker_token="token")
     with TestClient(app) as client:
-        assert client.put("/api/settings/asr", json={"mode": "faster_whisper"}).status_code == 200
+        assert client.put("/api/settings/asr", json={"mode": "whisperjav", "whisperjav_ensemble": False}).status_code == 200
         assert client.get("/api/worker/asr-settings", headers=PROTOCOL).status_code == 401
         reply = client.get("/api/worker/asr-settings", headers={**PROTOCOL, "X-Worker-Token": "token"})
-        assert reply.json() == {"mode": "faster_whisper", "whisperjav_ensemble": False}
+        assert reply.json() == {"mode": "whisperjav", "whisperjav_ensemble": False}
 
         import httpx
 
@@ -109,7 +106,7 @@ def test_mode_is_read_from_the_main_app_and_cached(tmp_path: Path, monkeypatch: 
         config_file = tmp_path / "worker" / "worker.yaml"
         config_file.parent.mkdir()
         assert model_catalog.fetch_mode(config, config_file) == {
-            "mode": "faster_whisper", "whisperjav_ensemble": False, "live": True,
+            "mode": "whisperjav", "whisperjav_ensemble": False, "live": True,
         }
     # 主程序关了：用上次读到的。
     monkeypatch.setattr(httpx, "get", lambda *args, **kwargs: (_ for _ in ()).throw(httpx.ConnectError("down")))
@@ -159,15 +156,14 @@ def test_desktop_worker_only_offers_modes_whose_models_are_downloaded(tmp_path: 
     assert worker.supported_asr_modes() == ["whisperjav"]
     assert worker.supports_whisperjav_ensemble() is False
     _cache(repos["anime-whisper"][0])
-    _cache(repos["faster-whisper"][0])
-    assert worker.supported_asr_modes() == ["whisperjav", "faster_whisper"]
+    assert worker.supported_asr_modes() == ["whisperjav"]
     assert worker.supports_whisperjav_ensemble() is True
 
     # 源码部署和 Docker 不受影响：模型在识别时下载。
     config.asr.local_models_only = False
-    for model in ("qwen3-asr", "anime-whisper", "faster-whisper"):
+    for model in ("qwen3-asr", "anime-whisper"):
         model_catalog.delete(config, model)
-    assert worker.supported_asr_modes() == ["whisperjav", "faster_whisper"]
+    assert worker.supported_asr_modes() == ["whisperjav"]
     assert worker.supports_whisperjav_ensemble() is True
 
 
@@ -197,24 +193,19 @@ def test_smaller_variants_are_listed_and_can_be_selected(tmp_path: Path) -> None
 
     config = load_worker_config(config_file, require_token=False)
     result = model_catalog.status(config, config_file)
-    qwen, anime, whisper = result["models"]
+    qwen, anime = result["models"]
     assert qwen["variant"] == "Qwen/Qwen3-ASR-1.7B" and anime["variants"] == []
     assert [(v["label"], v["size_mb"]) for v in qwen["variants"]] == [("1.7B", 4492), ("0.6B", 1800)]
-    assert [v["label"] for v in whisper["variants"]] == ["large-v3", "large-v3-turbo", "medium", "small"]
-    assert whisper["variants"][1]["size_mb"] == 1547
 
     # 改用小版本：写进 worker.yaml，其他设置和注释保留。
     before = config_file.read_text(encoding="utf-8")
     model_catalog.select(config_file, "qwen3-asr", "Qwen/Qwen3-ASR-0.6B")
-    model_catalog.select(config_file, "faster-whisper", "large-v3-turbo")
     after = config_file.read_text(encoding="utf-8")
     assert after.count("\n") == before.count("\n") and "# " in after
     config = load_worker_config(config_file, require_token=False)
-    assert (config.whisperjav.model, config.asr.model) == ("Qwen/Qwen3-ASR-0.6B", "large-v3-turbo")
-    assert config.asr.compute_type == WorkerConfig().asr.compute_type
+    assert config.whisperjav.model == "Qwen/Qwen3-ASR-0.6B"
     repos = {model.id: model.repos for model in model_catalog.catalog(config)}
     assert repos["qwen3-asr"][0].repo_id == "Qwen/Qwen3-ASR-0.6B"
-    assert repos["faster-whisper"][0].repo_id == "mobiuslabsgmbh/faster-whisper-large-v3-turbo"
 
     # 只有下载了当前选的版本才算支持这个模式。
     for repo in repos["qwen3-asr"]:
@@ -227,19 +218,19 @@ def test_smaller_variants_are_listed_and_can_be_selected(tmp_path: Path) -> None
     assert [v["downloaded"] for v in status["models"][0]["variants"]] == [False, True]
 
     # 手动写在 worker.yaml 里的其他模型也列出来。
-    model_catalog.select(config_file, "faster-whisper", "Systran/faster-whisper-tiny")
+    model_catalog.select(config_file, "qwen3-asr", "example/qwen")
     config = load_worker_config(config_file, require_token=False)
-    labels = [v.label for v in next(m for m in model_catalog.catalog(config) if m.id == "faster-whisper").variants]
-    assert labels[-1] == "Systran/faster-whisper-tiny"
+    labels = [v.label for v in next(m for m in model_catalog.catalog(config) if m.id == "qwen3-asr").variants]
+    assert labels[-1] == "example/qwen"
 
 
 def test_download_can_switch_variant_first(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "config" / "worker.yaml"
     config_file.parent.mkdir()
-    config_file.write_text("asr:\n  model: large-v3\n", encoding="utf-8")
+    config_file.write_text("whisperjav:\n  model: Qwen/Qwen3-ASR-1.7B\n", encoding="utf-8")
     fetched = []
     monkeypatch.setattr(model_catalog, "_fetch", lambda repo: fetched.append(repo.repo_id))
-    monkeypatch.setattr(model_catalog, "download", lambda config, ids: fetched.append((config.asr.model, ids)))
-    assert model_catalog.main(["--config", str(config_file), "download", "faster-whisper@small"]) == 0
-    assert fetched == [("small", ["faster-whisper"])]
-    assert "model: \"small\"" in config_file.read_text(encoding="utf-8")
+    monkeypatch.setattr(model_catalog, "download", lambda config, ids: fetched.append((config.whisperjav.model, ids)))
+    assert model_catalog.main(["--config", str(config_file), "download", "qwen3-asr@example/qwen"]) == 0
+    assert fetched == [("example/qwen", ["qwen3-asr"])]
+    assert "model: \"example/qwen\"" in config_file.read_text(encoding="utf-8")

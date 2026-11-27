@@ -56,7 +56,7 @@ SOURCES: dict[str, Source] = {
             ("南京大学", "https://mirror.nju.edu.cn/pytorch/whl"),
             ("官方", "https://download.pytorch.org/whl"),
         ),
-        "{url}/cu128/torch/",
+        "{url}/cu130/torch/" if sys.platform.startswith("linux") else "{url}/cu128/torch/",
     ),
     "hf": Source(
         "Hugging Face",

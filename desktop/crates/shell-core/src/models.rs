@@ -1,6 +1,6 @@
 //! 识别模型清单：在识别程序的环境里运行 `video_turbo.worker.model_catalog`，列出、下载、删除模型。
 //!
-//! 每种识别模式要的模型不同（WhisperJAV：Qwen3-ASR，双遍再加 anime-whisper；faster-whisper：Whisper large-v3）。
+//! 每种识别模式要的模型不同（WhisperJAV：Qwen3-ASR，双遍再加 anime-whisper）。
 //! 清单从主程序读取当前识别模式，标出“当前模式需要”的模型；默认只下载这些，其余由用户在清单里自己下载。
 
 use std::ffi::OsString;
@@ -54,8 +54,6 @@ pub struct ModelStatus {
     pub models: Vec<ModelInfo>,
     /// 当前识别模式需要、还没下载的模型。
     pub missing: Vec<String>,
-    /// Windows：faster-whisper 要的显卡运行库是否找得到。
-    pub runtime_ready: bool,
 }
 
 impl ModelStatus {
@@ -72,6 +70,18 @@ impl ModelStatus {
             .collect();
         ids.sort();
         ids
+    }
+
+    pub fn can_transcribe(&self) -> bool {
+        self.find("qwen3-asr").is_some_and(|model| model.downloaded)
+    }
+
+    pub fn needs_download(&self, selection: &str) -> bool {
+        // 已保存的选择可能包含旧版模型。有效的带版本选择交给下载器切换版本。
+        match selection.split_once('@') {
+            Some((id, _variant)) => self.find(id).is_some(),
+            None => self.find(selection).is_some_and(|model| !model.downloaded),
+        }
     }
 
     pub fn find(&self, id: &str) -> Option<&ModelInfo> {
@@ -101,7 +111,6 @@ pub fn needed(mode: Option<&ModeInfo>) -> Vec<&'static str> {
             vec!["qwen3-asr", "anime-whisper"]
         }
         Some(mode) if mode.mode == "whisperjav" => vec!["qwen3-asr"],
-        Some(mode) if mode.mode == "faster_whisper" => vec!["faster-whisper"],
         _ => Vec::new(),
     }
 }
@@ -132,7 +141,7 @@ pub fn default_catalog(mode: Option<ModeInfo>) -> ModelStatus {
         })
         .collect();
     let missing = models.iter().filter(|model| model.needed).map(|model| model.id.clone()).collect();
-    ModelStatus { mode, models, missing, runtime_ready: true }
+    ModelStatus { mode, models, missing }
 }
 
 /// 下载进度。
@@ -164,13 +173,6 @@ struct AsrSettings {
 }
 
 impl WorkerEnv {
-    /// 识别机协议版本（附带的部署包里 protocol.py 的 WORKER_PROTOCOL_VERSION）。
-    fn protocol_version(&self) -> Option<String> {
-        let text = std::fs::read_to_string(self.bundle.join("src/video_turbo/protocol.py")).ok()?;
-        let line = text.lines().find(|line| line.starts_with("WORKER_PROTOCOL_VERSION ="))?;
-        Some(line.split('=').nth(1)?.trim().to_string())
-    }
-
     /// 连接前从主程序读当前识别模式（接入地址是 http 时）；读不到返回 None。
     pub fn fetch_mode(&self, server_url: &str, token: &str) -> Option<ModeInfo> {
         let protocol = self.protocol_version()?;
@@ -276,7 +278,7 @@ mod tests {
             let mut request = [0u8; 1024];
             let size = stream.read(&mut request).unwrap();
             let request = String::from_utf8_lossy(&request[..size]).to_string();
-            let body = r#"{"mode": "faster_whisper", "whisperjav_ensemble": false}"#;
+            let body = r#"{"mode": "whisperjav", "whisperjav_ensemble": false}"#;
             let _ = stream.write_all(format!("HTTP/1.1 200 OK\r\n\r\n{body}").as_bytes());
             request
         });
@@ -289,13 +291,10 @@ mod tests {
             config_dir: "config".into(),
         };
         let mode = env.fetch_mode(&format!("http://127.0.0.1:{port}/"), "tok").unwrap();
-        assert_eq!(
-            (mode.mode.as_str(), mode.whisperjav_ensemble, mode.live),
-            ("faster_whisper", false, true)
-        );
+        assert_eq!((mode.mode.as_str(), mode.whisperjav_ensemble, mode.live), ("whisperjav", false, true));
         let request = server.join().unwrap();
         assert!(request.starts_with("GET /api/worker/asr-settings HTTP/1.0"));
-        assert!(request.contains("X-Worker-Token: tok") && request.contains("X-VideoTurbo-Protocol: 1"));
+        assert!(request.contains("X-Worker-Token: tok") && request.contains("X-VideoTurbo-Protocol: 2"));
         // https 和连不上的地址：不知道模式。
         assert!(env.fetch_mode("https://example.invalid", "tok").is_none());
     }
@@ -307,15 +306,14 @@ mod tests {
         };
         assert_eq!(default_catalog(mode("whisperjav", true)).missing, vec!["qwen3-asr", "anime-whisper"]);
         assert_eq!(default_catalog(mode("whisperjav", false)).missing, vec!["qwen3-asr"]);
-        assert_eq!(default_catalog(mode("faster_whisper", false)).missing, vec!["faster-whisper"]);
         // 不知道当前模式：按默认的双遍勾选，但不假装知道模式。
         let unknown = default_catalog(None);
         assert_eq!(unknown.missing, vec!["qwen3-asr", "anime-whisper"]);
         assert!(unknown.mode.is_none());
-        assert_eq!(unknown.models.len(), 3);
+        assert_eq!(unknown.models.len(), 2);
         assert!(unknown.models.iter().all(|model| !model.downloaded && model.size_mb.is_some()));
-        let labels: Vec<&str> = unknown.models[2].variants.iter().map(|v| v.label.as_str()).collect();
-        assert_eq!(labels, ["large-v3", "large-v3-turbo", "medium", "small"]);
+        let labels: Vec<&str> = unknown.models[0].variants.iter().map(|v| v.label.as_str()).collect();
+        assert_eq!(labels, ["1.7B", "0.6B"]);
         assert_eq!(unknown.models[0].variant.as_deref(), Some("Qwen/Qwen3-ASR-1.7B"));
     }
 
@@ -324,16 +322,25 @@ mod tests {
         let json = r#"{"mode": {"mode": "whisperjav", "whisperjav_ensemble": true, "live": true},
             "models": [{"id": "qwen3-asr", "zh": "Qwen3-ASR", "en": "Qwen3-ASR", "purpose_zh": "第一遍",
                         "purpose_en": "pass 1", "size_mb": 4492, "downloaded": true, "needed": true},
-                       {"id": "faster-whisper", "zh": "Whisper large-v3", "en": "Whisper large-v3",
-                        "purpose_zh": "faster-whisper", "purpose_en": "faster-whisper", "size_mb": null,
+                       {"id": "anime-whisper", "zh": "anime-whisper", "en": "anime-whisper",
+                        "purpose_zh": "anime-whisper", "purpose_en": "anime-whisper", "size_mb": null,
                         "downloaded": false, "needed": false}],
-            "missing": ["anime-whisper"], "runtime_ready": true}"#;
+            "missing": ["anime-whisper"]}"#;
         let status: ModelStatus = serde_json::from_str(json).unwrap();
+        assert!(status.can_transcribe());
+        assert!(!status.needs_download("faster-whisper@large-v3"));
+        assert!(!status.needs_download("qwen3-asr"));
+        assert!(status.needs_download("qwen3-asr@Qwen/Qwen3-ASR-0.6B"));
+        assert!(status.needs_download("anime-whisper"));
+        let mut anime_only = status.clone();
+        anime_only.models[0].downloaded = false;
+        anime_only.models[1].downloaded = true;
+        assert!(!anime_only.can_transcribe());
         assert_eq!(status.downloaded(), vec!["qwen3-asr".to_string()]);
         let mut with_variant = status.clone();
         with_variant.models[0].variant = Some("Qwen/Qwen3-ASR-0.6B".into());
         assert_eq!(with_variant.downloaded(), vec!["qwen3-asr@Qwen/Qwen3-ASR-0.6B".to_string()]);
         assert_eq!(status.missing, vec!["anime-whisper".to_string()]);
-        assert_eq!(status.find("faster-whisper").unwrap().size_mb, None);
+        assert_eq!(status.find("anime-whisper").unwrap().size_mb, None);
     }
 }

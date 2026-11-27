@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -100,3 +101,33 @@ def test_skipped_note_migration_matches_the_current_marker(tmp_path) -> None:
     )
     _apply(conn, V2_SKIPPED_NOTE)
     assert conn.execute("SELECT last_error FROM jobs").fetchone()[0] == SKIPPED_NOTE
+
+
+@pytest.mark.parametrize(
+    ("mode", "ensemble", "expected"),
+    [("faster_whisper", True, False), ("whisperjav", True, True), ("whisperjav", False, False)],
+)
+def test_subtitle_upgrade_preserves_pass_setting(tmp_path, mode, ensemble, expected):
+    from video_turbo.config import AppConfig
+
+    old = {"mode": mode, "whisperjav_ensemble": ensemble}
+    settings = {"mode": "whisperjav", "whisperjav_ensemble": expected}
+    assert AppConfig.model_validate({"asr": old}).asr.model_dump() == settings
+
+    conn = sqlite3.connect(tmp_path / "upgrade.db")
+    migrations._apply(conn, migrations.V1)
+    conn.execute("PRAGMA user_version = 2")
+    conn.execute("INSERT INTO runtime_settings VALUES ('asr', ?, 'now')", (json.dumps(old),))
+    conn.executemany(
+        "INSERT INTO workers(name, version, gpu_name, memory_total_mb, model, compute_type, status, "
+        "registered_at, last_seen_at, supported_asr_modes_json, asr_mode) "
+        "VALUES (?, '1', 'RTX', 8000, 'model', 'float16', 'idle', 'now', 'now', ?, 'faster_whisper')",
+        [("fw", '["faster_whisper"]'), ("both", '["faster_whisper","whisperjav"]')],
+    )
+    conn.commit()
+    migrate(conn)
+    assert json.loads(conn.execute("SELECT value FROM runtime_settings WHERE key='asr'").fetchone()[0]) == settings
+    assert conn.execute("SELECT name, supported_asr_modes_json, asr_mode FROM workers ORDER BY name").fetchall() == [
+        ("both", '["whisperjav"]', None), ("fw", "[]", None),
+    ]
+    conn.close()

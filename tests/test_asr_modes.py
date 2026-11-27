@@ -17,7 +17,7 @@ from video_turbo.i18n import render
 from video_turbo.languages import LanguagePair
 from video_turbo.models import AsrSettings, JobState, SourceKind, WhisperJavProgress
 from video_turbo.orchestrator.app import app
-from video_turbo.worker.asr import Transcriber, TranscriptionCancelled
+from video_turbo.worker.asr import TranscriptionCancelled
 from video_turbo.worker.config import WorkerConfig, load_worker_config
 from video_turbo.worker.main import Worker
 from video_turbo.worker.whisperjav import WhisperJavTranscriber
@@ -71,9 +71,9 @@ def registration(name, **extra):
         "version": "0.0.0",
         "gpu_name": "test",
         "memory_total_mb": 12000,
-        "model": "large-v3",
+        "model": "Qwen/Qwen3-ASR-1.7B",
         "compute_type": "float16",
-        "supported_asr_modes": ["faster_whisper"],
+        "supported_asr_modes": ["whisperjav"],
         **extra,
     }
 
@@ -146,7 +146,7 @@ def test_settings_drive_claims_and_preserve_running_mode_and_metadata(tmp_path, 
     headers = {**PROTOCOL, "X-Worker-Token": "test-token"}
     with TestClient(app) as client:
         assert client.get("/api/settings/asr").json() == {"mode": "whisperjav", "whisperjav_ensemble": True}
-        assert client.put("/api/settings/asr", json={"mode": "unknown"}).status_code == 422
+        assert client.put("/api/settings/asr", json={"mode": "faster_whisper"}).status_code == 422
         assert client.get("/api/status").json()["asr"] == {"mode": "whisperjav", "whisperjav_ensemble": True}
         first = queue_job(tmp_path, "one.mkv")
         client.post("/api/workers/register", headers=headers, json=registration("rtx4070ti"))
@@ -156,13 +156,13 @@ def test_settings_drive_claims_and_preserve_running_mode_and_metadata(tmp_path, 
         client.post(
             "/api/workers/register",
             headers=headers,
-            json=registration("rtx4070ti", supported_asr_modes=["whisperjav", "faster_whisper"], supports_whisperjav_ensemble=True),
+            json=registration("rtx4070ti", supported_asr_modes=["whisperjav"], supports_whisperjav_ensemble=True),
         )
         claim = client.post("/api/workers/rtx4070ti/claim", headers=headers).json()
         assert claim["job_id"] == first
         assert claim["asr_mode"] == "whisperjav"
         assert claim["whisperjav_ensemble"] is True
-        assert client.put("/api/settings/asr", json={"mode": "faster_whisper"}).status_code == 200
+        assert client.put("/api/settings/asr", json={"mode": "whisperjav", "whisperjav_ensemble": False}).status_code == 200
         assert app.state.database.get_job(first)["state"] == JobState.TRANSCRIBING
         response = client.post(
             "/api/workers/rtx4070ti/heartbeat",
@@ -198,35 +198,12 @@ def test_settings_drive_claims_and_preserve_running_mode_and_metadata(tmp_path, 
         second = queue_job(tmp_path, "two.mkv")
         claim = client.post("/api/workers/rtx4070ti/claim", headers=headers).json()
         assert claim["job_id"] == second
-        assert claim["asr_mode"] == "faster_whisper"
+        assert claim["asr_mode"] == "whisperjav"
     with TestClient(app) as client:
-        assert client.get("/api/settings/asr").json() == {"mode": "faster_whisper", "whisperjav_ensemble": True}
+        assert client.get("/api/settings/asr").json() == {"mode": "whisperjav", "whisperjav_ensemble": False}
         client.put("/api/settings/asr", json={"mode": "whisperjav"})
     with TestClient(app) as client:
         assert client.get("/api/settings/asr").json() == {"mode": "whisperjav", "whisperjav_ensemble": True}
-
-
-def test_worker_switches_implementation_and_releases_old_model():
-    async def check():
-        config = WorkerConfig(
-            worker_token="token", whisperjav={"python_executable": sys.executable}
-        )
-        worker = Worker(config)
-        try:
-            worker.supported_asr_modes = lambda: ["whisperjav", "faster_whisper"]
-            old = worker.transcriber
-            old._model = object()
-            worker._select_transcriber("whisperjav")
-            assert old._model is None
-            assert isinstance(worker.transcriber, WhisperJavTranscriber)
-            worker._select_transcriber("faster_whisper")
-            assert isinstance(worker.transcriber, Transcriber)
-            with pytest.raises(RuntimeError):
-                worker._select_transcriber("unknown")
-        finally:
-            await worker.close()
-
-    asyncio.run(check())
 
 
 def test_selected_whisperjav_backend_knows_gpu_memory_for_parallel_passes(monkeypatch):
@@ -236,7 +213,7 @@ def test_selected_whisperjav_backend_knows_gpu_memory_for_parallel_passes(monkey
         )
         worker = Worker(config)
         try:
-            worker.supported_asr_modes = lambda: ["whisperjav", "faster_whisper"]
+            worker.supported_asr_modes = lambda: ["whisperjav"]
             worker._query_hardware = lambda: SimpleNamespace(device_type="cuda", memory_total_mb=24576)
             worker._select_transcriber("whisperjav")
             worker.transcriber.ensemble = True
@@ -279,7 +256,7 @@ def test_isolated_interpreter_symlink_is_preserved(tmp_path):
     async def check():
         worker = Worker(parsed)
         try:
-            assert worker.supported_asr_modes() == ["whisperjav", "faster_whisper"]
+            assert worker.supported_asr_modes() == ["whisperjav"]
             assert worker.supports_whisperjav_ensemble() is False
             marker.write_text('{"version":"1.9.5","ensemble":true}')
             assert worker.supports_whisperjav_ensemble() is True
@@ -382,7 +359,7 @@ def test_progress_observer_failure_does_not_break_recognition(fake_backend, monk
 def test_worker_reports_scene_progress_without_chunk_eta(tmp_path):
     async def check():
         worker = Worker(WorkerConfig(cache_dir=tmp_path, worker_token="token"))
-        worker.supported_asr_modes = lambda: ["whisperjav", "faster_whisper"]
+        worker.supported_asr_modes = lambda: ["whisperjav"]
         worker._query_hardware = lambda: SimpleNamespace(
             device_type="cpu", utilization=10, memory_free_mb=8000
         )
@@ -502,7 +479,7 @@ def test_worker_executes_selected_backend_and_uploads_normalized_result(fake_bac
                 whisperjav={"python_executable": sys.executable},
             )
         )
-        worker.supported_asr_modes = lambda: ["whisperjav", "faster_whisper"]
+        worker.supported_asr_modes = lambda: ["whisperjav"]
         await worker.client.aclose()
         worker.client = httpx.AsyncClient(
             base_url="http://nas", transport=httpx.MockTransport(server)
@@ -517,7 +494,6 @@ def test_worker_executes_selected_backend_and_uploads_normalized_result(fake_bac
                 }
             )
             assert worker.current_job_id is None
-            assert worker.model_reserved_mb == 0
             assert worker.asr_whisperjav_progress is None
         finally:
             await worker.close()
@@ -593,7 +569,7 @@ def test_dual_pass_settings_capabilities_and_downloads(tmp_path, monkeypatch):
     with TestClient(app) as client:
         assert client.put("/api/settings/asr", json=settings).json() == settings
         first = queue_job(tmp_path, "dual.mkv")
-        worker = registration("rtx4070ti", supported_asr_modes=["whisperjav", "faster_whisper"])
+        worker = registration("rtx4070ti", supported_asr_modes=["whisperjav"])
         client.post("/api/workers/register", headers=headers, json=worker).raise_for_status()
         assert client.post("/api/workers/rtx4070ti/claim", headers=headers).json() is None
         worker["supports_whisperjav_ensemble"] = True
@@ -602,7 +578,7 @@ def test_dual_pass_settings_capabilities_and_downloads(tmp_path, monkeypatch):
         assert claim["whisperjav_ensemble"] is True
         assert client.get("/api/status").json()["workers"][0]["supports_whisperjav_ensemble"] is True
         # Changing settings cannot alter the already issued claim.
-        client.put("/api/settings/asr", json={"mode": "faster_whisper", "whisperjav_ensemble": True})
+        client.put("/api/settings/asr", json={"mode": "whisperjav", "whisperjav_ensemble": False})
         payload = {
             "job_id": first, "worker_name": "rtx4070ti", "language": "ja",
             "duration_seconds": 60, "metadata": {"ensemble": True},
@@ -624,10 +600,10 @@ def test_dual_pass_settings_capabilities_and_downloads(tmp_path, monkeypatch):
         for kind in artifacts:
             assert client.get(f"/api/jobs/{first}/files/asr_{kind}").status_code == 404
         claim = client.post("/api/workers/rtx4070ti/claim", headers=headers).json()
-        assert claim["asr_mode"] == "faster_whisper"
+        assert claim["asr_mode"] == "whisperjav"
         assert claim["whisperjav_ensemble"] is False
     with TestClient(app) as client:
-        assert client.get("/api/settings/asr").json() == {"mode": "faster_whisper", "whisperjav_ensemble": True}
+        assert client.get("/api/settings/asr").json() == {"mode": "whisperjav", "whisperjav_ensemble": False}
 
 
 @pytest.mark.parametrize("device,dtype", [("cpu", "float32"), ("cuda", "float16")])
@@ -767,7 +743,7 @@ def test_worker_uploads_dual_artifacts_then_resets_to_single(fake_ensemble_backe
 
     async def check():
         worker = Worker(WorkerConfig(worker_token="token", cache_dir=audio.parent / "worker", whisperjav={"python_executable": sys.executable}))
-        worker.supported_asr_modes = lambda: ["whisperjav", "faster_whisper"]
+        worker.supported_asr_modes = lambda: ["whisperjav"]
         worker.supports_whisperjav_ensemble = lambda: True
         await worker.client.aclose()
         worker.client = httpx.AsyncClient(base_url="http://nas", transport=httpx.MockTransport(server))
@@ -836,16 +812,16 @@ def test_claim_uses_job_language_and_runs_anime_whisper_only_for_japanese(tmp_pa
         assert claim["whisperjav_ensemble"] is True
 
 
-def test_faster_whisper_claims_carry_source_language(tmp_path, monkeypatch):
+def test_single_pass_claims_carry_source_language(tmp_path, monkeypatch):
     prepare_server(tmp_path, monkeypatch)
     headers = {**PROTOCOL, "X-Worker-Token": "test-token"}
     with TestClient(app) as client:
-        client.put("/api/settings/asr", json={"mode": "faster_whisper"})
+        client.put("/api/settings/asr", json={"mode": "whisperjav", "whisperjav_ensemble": False})
         korean = queue_job(tmp_path, "ko.mkv", LanguagePair("ko", "zh-CN"))
-        client.post("/api/workers/register", headers=headers, json=registration("fw"))
-        claim = client.post("/api/workers/fw/claim", headers=headers).json()
+        client.post("/api/workers/register", headers=headers, json=registration("single"))
+        claim = client.post("/api/workers/single/claim", headers=headers).json()
         assert (claim["job_id"], claim["language"], claim["asr_mode"]) == (
-            korean, "ko", "faster_whisper"
+            korean, "ko", "whisperjav"
         )
         assert claim["whisperjav_ensemble"] is False
 

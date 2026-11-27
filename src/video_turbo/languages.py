@@ -86,7 +86,7 @@ class Language:
     prompt: PromptTerms
     can_be_source: bool
     can_be_target: bool
-    # 传给识别后端的语言：Faster-Whisper 用 asr_code，WhisperJAV 的 Qwen3-ASR 用 asr_name。
+    # 传给识别后端的语言：任务传递 asr_code，WhisperJAV 的 Qwen3-ASR 使用 asr_name。
     # 只有可作源语言的语言需要。
     asr_code: str | None = None
     asr_name: str | None = None

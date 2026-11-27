@@ -495,6 +495,13 @@ class AppConfig(ConfigBase):
     workers: WorkersConfig = Field(default_factory=WorkersConfig)
     restore: RestoreConfig = Field(default_factory=RestoreConfig)
 
+    @field_validator("asr", mode="before")
+    @classmethod
+    def migrate_legacy_asr(cls, value):
+        if isinstance(value, dict) and value.get("mode") == "faster_whisper":
+            return {**value, "mode": "whisperjav", "whisperjav_ensemble": False}
+        return value
+
     @model_validator(mode="after")
     def validate_libraries(self) -> AppConfig:
         ids: set[str] = set()
