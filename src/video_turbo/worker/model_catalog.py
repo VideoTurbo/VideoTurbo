@@ -1,23 +1,12 @@
 """识别模型清单：桌面版的本机识别窗口和 Worker 应用用它列出、下载、删除模型。
 
-每种识别模式需要的模型不同：
-
-- WhisperJAV（默认）：Qwen3-ASR（第一遍，约 4.4 GB）；双遍时再加 anime-whisper（第二遍，约 2.8 GB）。
-  FireRedVAD 只有几 MB，随 Qwen3-ASR 一起下载。
-- faster-whisper：Whisper large-v3（约 2.9 GB）。
-
-Qwen3-ASR 和 Whisper 有小版本可选（Qwen3-ASR 0.6B；Whisper large-v3-turbo、medium、small），
-在每台电脑的模型清单里选，选择写进这台电脑的 worker.yaml（whisperjav.model / asr.model）。
-
-桌面版默认只下载当前识别模式（从主程序读取）需要的模型，其余的由用户在清单里自己下载。
-模型放在 Hugging Face 缓存目录里，布局与识别时一致（WhisperJAV 用 ``<模型目录>/huggingface``，
-faster-whisper 直接用 ``<模型目录>``），所以下载好之后识别时不再联网。
+单遍下载 Qwen3-ASR 和所选 VAD，双遍还需要 anime-whisper。
+模型缓存在 <模型目录>/huggingface。Qwen 的模型选择写入 worker.yaml 的 whisperjav.model。
 
 命令行（外壳在识别程序的环境里运行）::
 
     python -m video_turbo.worker.model_catalog --config <worker.yaml> status
     python -m video_turbo.worker.model_catalog --config <worker.yaml> download qwen3-asr anime-whisper
-    python -m video_turbo.worker.model_catalog --config <worker.yaml> download faster-whisper@large-v3-turbo
     python -m video_turbo.worker.model_catalog --config <worker.yaml> select qwen3-asr Qwen/Qwen3-ASR-0.6B
     python -m video_turbo.worker.model_catalog --config <worker.yaml> delete anime-whisper
 
@@ -37,7 +26,6 @@ import sys
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from fnmatch import fnmatch
 from pathlib import Path
 
 from .config import WorkerConfig, load_worker_config
@@ -46,21 +34,14 @@ logger = logging.getLogger(__name__)
 PROGRESS = "@@VT "
 QWEN = "qwen3-asr"
 ANIME = "anime-whisper"
-FASTER_WHISPER = "faster-whisper"
 ANIME_REPO = "litagin/anime-whisper"
 FIRERED_VAD_REPO = "FireRedTeam/FireRedVAD"
-# 与 faster_whisper.utils.download_model 下载的文件一致。
-FASTER_WHISPER_FILES = ("config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*")
 # 默认模型的大小（MB），连不上 Hugging Face 时用来显示；能连上时以实际文件大小为准。
 KNOWN_SIZES_MB = {
     "Qwen/Qwen3-ASR-1.7B": 4485,
     "Qwen/Qwen3-ASR-0.6B": 1793,
     ANIME_REPO: 2887,
     FIRERED_VAD_REPO: 7,
-    "Systran/faster-whisper-large-v3": 2948,
-    "mobiuslabsgmbh/faster-whisper-large-v3-turbo": 1547,
-    "Systran/faster-whisper-medium": 1460,
-    "Systran/faster-whisper-small": 464,
 }
 # 主程序的识别模式缓存在配置旁边：连不上主程序时用上次的结果。
 MODE_FILE = "asr-mode.json"
@@ -71,7 +52,6 @@ SERVER_TIMEOUT_SECONDS = 5.0
 class Repo:
     repo_id: str
     cache: Path
-    patterns: tuple[str, ...] = ()
 
     @property
     def folder(self) -> Path:
@@ -89,15 +69,9 @@ class Variant:
 # 第一个是默认版本。
 VARIANTS = {
     QWEN: (Variant("Qwen/Qwen3-ASR-1.7B", "1.7B"), Variant("Qwen/Qwen3-ASR-0.6B", "0.6B")),
-    FASTER_WHISPER: (
-        Variant("large-v3", "large-v3"),
-        Variant("large-v3-turbo", "large-v3-turbo"),
-        Variant("medium", "medium"),
-        Variant("small", "small"),
-    ),
 }
 # 版本写在 worker.yaml 的哪一节、哪个键。
-SETTINGS = {QWEN: ("whisperjav", "model"), FASTER_WHISPER: ("asr", "model")}
+SETTINGS = {QWEN: ("whisperjav", "model")}
 
 
 @dataclass(frozen=True)
@@ -117,16 +91,6 @@ class Model:
         return _size_mb(self.repos)
 
 
-def _faster_whisper_repo(name: str) -> str:
-    if "/" in name or Path(name).expanduser().is_dir():
-        return name
-    try:
-        from faster_whisper.utils import _MODELS
-    except ImportError:
-        return f"Systran/faster-whisper-{name}"
-    return _MODELS.get(name, f"Systran/faster-whisper-{name}")
-
-
 def repos(config: WorkerConfig, model_id: str, value: str | None = None) -> tuple[Repo, ...]:
     """模型（某个版本，默认当前版本）要下载的仓库。"""
     hub = config.asr.download_root / "huggingface"
@@ -137,9 +101,6 @@ def repos(config: WorkerConfig, model_id: str, value: str | None = None) -> tupl
         return tuple(found)
     if model_id == ANIME:
         return (Repo(ANIME_REPO, hub),)
-    if model_id == FASTER_WHISPER:
-        name = value or config.asr.model
-        return (Repo(_faster_whisper_repo(name), config.asr.download_root, FASTER_WHISPER_FILES),)
     return ()
 
 
@@ -150,14 +111,12 @@ def _variants(model_id: str, current: str) -> tuple[Variant, ...]:
 
 
 def catalog(config: WorkerConfig) -> list[Model]:
-    qwen, whisper = config.whisperjav.model, config.asr.model
+    qwen = config.whisperjav.model
     return [
         Model(QWEN, "Qwen3-ASR", "Qwen3-ASR", "WhisperJAV 模式（第一遍）", "WhisperJAV mode (pass 1)",
               repos(config, QWEN), ("whisperjav",), qwen, _variants(QWEN, qwen)),
         Model(ANIME, "anime-whisper", "anime-whisper", "WhisperJAV 双遍（第二遍）", "WhisperJAV two-pass (pass 2)",
               repos(config, ANIME), ("whisperjav_ensemble",)),
-        Model(FASTER_WHISPER, "Whisper", "Whisper", "faster-whisper 模式", "faster-whisper mode",
-              repos(config, FASTER_WHISPER), ("faster_whisper",), whisper, _variants(FASTER_WHISPER, whisper)),
     ]
 
 
@@ -187,20 +146,13 @@ def needed(mode: str | None, ensemble: bool) -> list[str]:
     """识别模式需要的模型。"""
     if mode == "whisperjav":
         return [QWEN, ANIME] if ensemble else [QWEN]
-    if mode == "faster_whisper":
-        return [FASTER_WHISPER]
     return []
 
 
 def supported_modes(config: WorkerConfig) -> tuple[set[str], bool]:
     """已下载的模型支持哪些识别模式，以及 WhisperJAV 能否双遍。"""
     ready = {model.id for model in catalog(config) if downloaded(model)}
-    modes = set()
-    if QWEN in ready:
-        modes.add("whisperjav")
-    if FASTER_WHISPER in ready:
-        modes.add("faster_whisper")
-    return modes, QWEN in ready and ANIME in ready
+    return ({"whisperjav"} if QWEN in ready else set()), QWEN in ready and ANIME in ready
 
 
 def fetch_mode(config: WorkerConfig, config_file: Path) -> dict | None:
@@ -229,6 +181,8 @@ def fetch_mode(config: WorkerConfig, config_file: Path) -> dict | None:
             logger.debug("读取主程序的识别模式失败：%s", exc)
     try:
         result = json.loads(cached.read_text(encoding="utf-8"))
+        if result["mode"] == "faster_whisper":
+            return {"mode": "whisperjav", "whisperjav_ensemble": False, "live": False}
         return {"mode": str(result["mode"]), "whisperjav_ensemble": bool(result.get("whisperjav_ensemble")), "live": False}
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -259,15 +213,11 @@ def status(config: WorkerConfig, config_file: Path) -> dict:
                 for item in model.variants
             ],
         })
-    from .gpu import cuda_runtime_ready, torch_lib_dir
-
     return {
         "mode": mode,
         "models": models,
         # 当前识别模式需要、还没下载的模型。
         "missing": [item["id"] for item in models if item["needed"] and not item["downloaded"]],
-        # Windows：faster-whisper 需要的显卡运行库是否找得到（PyTorch 自带的或单独安装的）。
-        "runtime_ready": cuda_runtime_ready(torch_lib_dir(config.whisperjav.python_executable)),
     }
 
 
@@ -285,8 +235,6 @@ def _remote_size(repo: Repo) -> int | None:
         return None
     total = 0
     for sibling in info.siblings or []:
-        if repo.patterns and not any(fnmatch(sibling.rfilename, pattern) for pattern in repo.patterns):
-            continue
         total += sibling.size or 0
     return total or None
 
@@ -308,9 +256,7 @@ def _fetch(repo: Repo) -> None:
     import huggingface_hub
 
     repo.cache.mkdir(parents=True, exist_ok=True)
-    huggingface_hub.snapshot_download(
-        repo.repo_id, cache_dir=str(repo.cache), allow_patterns=list(repo.patterns) or None
-    )
+    huggingface_hub.snapshot_download(repo.repo_id, cache_dir=str(repo.cache))
 
 
 def download(

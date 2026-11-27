@@ -243,9 +243,9 @@ impl WorkerManager {
         self.start_with(connect, true, Some(ids));
     }
 
-    /// 已经下载过模型（不是第一次设置）。
+    /// 已具备识别所需的第一遍模型。
     pub fn has_models(&self) -> bool {
-        self.models().is_some_and(|catalog| !catalog.downloaded().is_empty())
+        self.models().is_some_and(|catalog| catalog.can_transcribe())
     }
 
     /// 让用户选模型用的清单：运行环境装好后是实际的清单，之前是按当前识别模式勾选的默认清单。
@@ -316,8 +316,7 @@ impl WorkerManager {
         requested: Option<Vec<String>>,
     ) {
         let installed = !self.env.needs_install();
-        let ready =
-            installed && self.refresh_models().is_some_and(|catalog| !catalog.downloaded().is_empty());
+        let ready = installed && self.refresh_models().is_some_and(|catalog| catalog.can_transcribe());
         if !allow_download && !ready {
             self.set(generation, WorkerPhase::Pending);
             return;
@@ -351,19 +350,18 @@ impl WorkerManager {
         let Some(mut catalog) = self.refresh_models() else {
             return self.fail(generation, "无法读取模型清单。".into(), self.env.logs().join("models.log"));
         };
-        // 用户点了下载就下载选的模型。第一次设置（一个模型都还没有）且同意下载时，下载当前识别模式要的模型；
+        // 用户点了下载就下载选的模型。首次准备第一遍模型且同意下载时，下载当前识别模式要的模型；
         // 之后换了识别模式缺模型时不自动下载，等用户在清单里点。
         let wanted: Vec<String> = match requested {
             Some(ids) => ids,
-            None if allow_download && catalog.downloaded().is_empty() => catalog.missing.clone(),
+            None if allow_download && !catalog.can_transcribe() => catalog.missing.clone(),
             None => Vec::new(),
         }
         .into_iter()
-        // 带版本的（模型@版本）交给清单：换版本，没下载过再下载。
-        .filter(|id| id.contains('@') || catalog.find(id).is_some_and(|model| !model.downloaded))
+        .filter(|id| catalog.needs_download(id))
         .collect();
         if !wanted.is_empty() {
-            if !self.fetch_models(generation, &cancel, &wanted, &catalog) {
+            if !self.fetch_models(generation, &cancel, &wanted) {
                 return;
             }
             match self.refresh_models() {
@@ -380,8 +378,8 @@ impl WorkerManager {
         if !self.current(generation) {
             return;
         }
-        // 一个模型都没有：等用户在清单里下载。
-        if catalog.downloaded().is_empty() {
+        // 第一遍模型尚未就绪时，等待用户在清单里下载。
+        if !catalog.can_transcribe() {
             self.set(generation, WorkerPhase::Pending);
             return;
         }
@@ -391,32 +389,7 @@ impl WorkerManager {
         self.supervise(generation);
     }
 
-    /// 下载模型；faster-whisper 在 Windows 上找不到显卡运行库时先单独安装。
-    fn fetch_models(&self, generation: u64, cancel: &Cancel, ids: &[String], catalog: &ModelStatus) -> bool {
-        if cfg!(windows)
-            && !catalog.runtime_ready
-            && ids.iter().any(|id| id == "faster-whisper" || id.starts_with("faster-whisper@"))
-        {
-            self.logger.info("找不到 faster-whisper 要的显卡运行库，单独安装");
-            let mut current = (0, 0, String::new(), String::new());
-            let result = self.env.install_runtime(cancel, |event| {
-                let line = match event {
-                    Event::Step { index, total, zh, en } => {
-                        current = (index, total, zh, en);
-                        String::new()
-                    }
-                    Event::Log(line) => line,
-                };
-                let (index, total, zh, en) = current.clone();
-                self.set(generation, WorkerPhase::Installing { index, total, zh, en, line });
-            });
-            if let Err(error) = result {
-                if !cancel.is_cancelled() {
-                    self.fail(generation, error.message(), self.env.install_log());
-                }
-                return false;
-            }
-        }
+    fn fetch_models(&self, generation: u64, cancel: &Cancel, ids: &[String]) -> bool {
         self.logger.info(&format!("下载模型：{}", ids.join("、")));
         let result = self.env.download_models(ids, cancel, |progress| {
             self.set(

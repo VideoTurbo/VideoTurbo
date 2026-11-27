@@ -14,7 +14,7 @@ import { groupMachines, machineKey, machineTag, supportsAsr, workerLabel } from 
 const now = Date.parse('2026-01-01T00:00:00Z')
 const seen = (secondsAgo: number) => new Date(now - secondsAgo * 1000).toISOString()
 const worker = (name: string, extra: Partial<Worker> = {}): Worker =>
-  ({ name, version: '0.1.0', status: 'online', last_seen_at: seen(5), gpu_name: 'NVIDIA GeForce RTX 5090', supported_asr_modes: ['faster_whisper'], ...extra })
+  ({ name, version: '0.1.0', status: 'online', last_seen_at: seen(5), gpu_name: 'NVIDIA GeForce RTX 5090', supported_asr_modes: ['whisperjav'], ...extra })
 
 describe('format', () => {
   it('formats durations and sizes', () => {
@@ -84,10 +84,9 @@ describe('workers', () => {
   })
 
   it('checks whether a worker supports the current recognition settings', () => {
-    const modern = worker('a', { supported_asr_modes: ['whisperjav', 'faster_whisper'], supports_whisperjav_ensemble: true })
+    const modern = worker('a', { supported_asr_modes: ['whisperjav'], supports_whisperjav_ensemble: true })
     expect(supportsAsr(modern, { mode: 'whisperjav', whisperjav_ensemble: true })).toBe(true)
-    expect(supportsAsr(worker('b', { supported_asr_modes: ['faster_whisper'] }), { mode: 'whisperjav', whisperjav_ensemble: false })).toBe(false)
-    expect(supportsAsr(worker('b', { supported_asr_modes: ['faster_whisper'] }), { mode: 'faster_whisper', whisperjav_ensemble: true })).toBe(true)
+    expect(supportsAsr(worker('b', { supported_asr_modes: [] }), { mode: 'whisperjav', whisperjav_ensemble: false })).toBe(false)
     expect(supportsAsr(worker('c', { supported_asr_modes: ['whisperjav'] }), { mode: 'whisperjav', whisperjav_ensemble: true })).toBe(false)
   })
 })

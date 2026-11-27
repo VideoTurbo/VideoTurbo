@@ -29,15 +29,9 @@ orchestrator = [
   "smbprotocol>=1.15,<2",
 ]
 worker = [
-  "faster-whisper>=1.2,<2",
-  # 4.6.3 起正式支持 RTX 5090（Blackwell / sm_120）与 CUDA 12.8。
-  "ctranslate2>=4.6.3,<5",
   "httpx>=0.28,<1",
   "psutil>=5.9,<8",
-  "nvidia-cublas-cu12>=12.6,<13; platform_system == 'Windows'",
-  "nvidia-cudnn-cu12>=9.3,<10; platform_system == 'Windows'",
-  "nvidia-cublas-cu12>=12.8,<12.9; platform_system == 'Linux'",
-  "nvidia-cudnn-cu12>=9.3,<10; platform_system == 'Linux'",
+  "huggingface-hub>=0.25,<2",
   # 内置 Samba 媒体库来源：GPU 机器直连共享读取影片。
   "smbprotocol>=1.15,<2",
 ]

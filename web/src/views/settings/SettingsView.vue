@@ -41,7 +41,7 @@ const category = ref<Category>('media')
 const emptySections = () => Object.fromEntries(Object.keys(configSchemas).map((key) => [key, {}])) as Record<ConfigSection, FormValues>
 const form = reactive({
   sections: emptySections(),
-  asr: { mode: 'whisperjav' as 'whisperjav' | 'faster_whisper', whisperjav_ensemble: false },
+  asr: { mode: 'whisperjav' as const, whisperjav_ensemble: false },
   uploadLimit: null as number | null,
   cloud: { idle_minutes: 30 as number | null, backstop_minutes: 60, update_jasna: true, jasna_license: '' },
   ui: { show_posters: true, notice_sound: true },
@@ -192,11 +192,8 @@ async function save(): Promise<void> {
           </div>
           <div class="settings-section">
             <h3>{{ t('settings.asr') }}</h3>
-            <FormField :label="t('settings.asrMode')" :tip="t('settings.asrModeHelp')">
-              <NSelect v-model:value="form.asr.mode" :options="[{ value: 'whisperjav', label: t('settings.asrMode.whisperjav') }, { value: 'faster_whisper', label: t('settings.asrMode.fasterWhisper') }]" />
-            </FormField>
             <SwitchRow
-              v-model="form.asr.whisperjav_ensemble" :label="t('settings.dualPass')" :disabled="form.asr.mode !== 'whisperjav'"
+              v-model="form.asr.whisperjav_ensemble" :label="t('settings.dualPass')"
               :tip="t('settings.dualPassHelp')"
               :help="t('settings.dualPassTip')"
             />

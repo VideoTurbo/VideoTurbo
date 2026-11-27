@@ -29,9 +29,13 @@ def torch_index_base_url() -> str:
     return (os.environ.get("VIDEO_TURBO_TORCH_INDEX_URL") or DEFAULT_TORCH_INDEX_BASE_URL).rstrip("/")
 
 
-# PyTorch 2.8.0 的 CUDA 轮子自带运行库，只依赖宿主机驱动；镜像内的 CUDA Toolkit 与
-# 预装 PyTorch 不参与。cu128 需要 R570+ 驱动，cu126 可在 R525+ 驱动上通过 CUDA 小版本
-# 兼容运行。Blackwell（算力 10.x/12.x，例如 RTX 5090）只有 cu128 轮子支持。
+# Jasna 的 Linux NVIDIA 基线。TorchAudio 2.11 使用稳定 ABI，
+# torchaudio.load 在这个版本通过 TorchCodec 读取音频。
+LINUX_CUDA_PACKAGES = (
+    "torch==2.12.1+cu130", "torchvision==0.27.1+cu130",
+    "torchaudio==2.11.0+cu130", "torchcodec==0.14.0+cu130",
+)
+# Windows 桌面版仍使用 PyTorch 2.8 的驱动兼容选项。
 CUDA_INDEXES = ("cu128", "cu126")
 DEFAULT_CUDA_INDEX = "cu128"
 CU128_MIN_DRIVER = 570
@@ -43,6 +47,9 @@ def torch_packages(
     system: str, device: str, has_nvidia: bool, cuda_index: str = DEFAULT_CUDA_INDEX
 ) -> list[str]:
     packages = ["torch==2.8.0", "torchaudio==2.8.0"]
+    if system == "Linux" and device in {"auto", "cuda"} and has_nvidia:
+        return [*LINUX_CUDA_PACKAGES, "--extra-index-url", pypi_index_url(),
+                "--index-url", f"{torch_index_base_url()}/cu130"]
     if system == "Darwin":
         return packages + ["--index-url", pypi_index_url()]
     cuda = device in {"auto", "cuda"} and has_nvidia
@@ -87,16 +94,22 @@ def query_nvidia_gpus() -> list[tuple[str, str]]:
     return [(row[0], "") for row in rows] if rows else []
 
 
-def select_cuda_index(gpus: list[tuple[str, str]]) -> tuple[str, str]:
+def select_cuda_index(gpus: list[tuple[str, str]], system: str) -> tuple[str, str]:
     """Pick the PyTorch CUDA wheel index for the host driver; exit if unsupported."""
     override = (os.environ.get("VIDEO_TURBO_TORCH_CUDA") or "").strip().lower()
+    drivers = [major for major in (_driver_major(driver) for driver, _ in gpus) if major]
+    if system == "Linux":
+        if override and override != "cu130":
+            raise SystemExit("Linux 字幕使用 cu130，请取消 VIDEO_TURBO_TORCH_CUDA 或将它设为 cu130。")
+        if not drivers or min(drivers) < 580:
+            raise SystemExit("Linux 字幕的 CUDA 13.0 需要可检测的 NVIDIA 580 或更高版本驱动。")
+        return "cu130", f"驱动 {min(drivers)}，使用 Jasna 的 PyTorch 2.12.1 + cu130"
     if override:
         if override not in CUDA_INDEXES:
             raise SystemExit(
                 f"VIDEO_TURBO_TORCH_CUDA 只能是 {' 或 '.join(CUDA_INDEXES)}，当前为 {override}。"
             )
         return override, f"使用 VIDEO_TURBO_TORCH_CUDA 指定的 {override}"
-    drivers = [major for major in (_driver_major(driver) for driver, _ in gpus) if major]
     if not drivers:
         return DEFAULT_CUDA_INDEX, f"无法读取 NVIDIA 驱动版本，按默认使用 {DEFAULT_CUDA_INDEX}"
     driver = min(drivers)
@@ -128,8 +141,10 @@ def main() -> None:
     args = parser.parse_args()
     has_nvidia = bool(shutil.which("nvidia-smi"))
     cuda_index = DEFAULT_CUDA_INDEX
+    if platform.system() == "Linux" and args.device == "cuda" and not has_nvidia:
+        raise SystemExit("Linux CUDA 字幕安装需要通过 nvidia-smi 检测 NVIDIA 驱动。")
     if platform.system() != "Darwin" and args.device in {"auto", "cuda"} and has_nvidia:
-        cuda_index, reason = select_cuda_index(query_nvidia_gpus())
+        cuda_index, reason = select_cuda_index(query_nvidia_gpus(), platform.system())
         print(f"PyTorch CUDA 版本：{reason}。", flush=True)
     if args.check_cuda:
         return
@@ -162,19 +177,21 @@ def main() -> None:
     def run(*command: str) -> None:
         subprocess.run(command, env=env, check=True)
 
-    if platform.system() == "Linux":
+    def check_linux_runtime(interpreter: str, check: str) -> None:
         # Match the Worker subprocess environment: system libraries must load
         # without LD_LIBRARY_PATH inherited from the cloud image.
         runtime_env = {key: value for key, value in env.items() if key != "LD_LIBRARY_PATH"}
         check_script = project / "src/video_turbo/worker/whisperjav_self_test.py"
         subprocess.run(
-            [sys.executable, "-I", "-c",
-             "import runpy, sys; runpy.run_path(sys.argv[1])['check_ten_vad_runtime']()",
+            [interpreter, "-I", "-c",
+             f"import runpy, sys; runpy.run_path(sys.argv[1])[{check!r}]()",
              str(check_script)],
             env=runtime_env,
             check=True,
         )
 
+    if platform.system() == "Linux":
+        check_linux_runtime(sys.executable, "check_ten_vad_runtime")
     if not python.is_file():
         run(sys.executable, "-m", "venv", str(venv))
     probe = subprocess.run(
@@ -205,6 +222,7 @@ def main() -> None:
         f"whisperjav[cli,qwen] @ git+{select_sources.github_prefix()}"
         f"https://github.com/meizhong986/WhisperJAV.git@{REVISION}",
         "qwen-asr==0.0.6",
+        *(LINUX_CUDA_PACKAGES if cuda_index == "cu130" else ()),
     )
     run(str(python), "-m", "pip", "check")
     run(
@@ -212,10 +230,12 @@ def main() -> None:
         "-c",
         "from importlib.metadata import version; from importlib.util import find_spec; "
         f"assert version('whisperjav') == {VERSION!r}; "
-        "assert all(find_spec(name) for name in ('qwen_asr', 'fireredvad', 'ten_vad', 'transformers')); "
-        "print('WhisperJAV 独立环境安装完成；请运行自检，提前下载并验证双遍模型、VAD 和合并。')",
+        "assert all(find_spec(name) for name in ('qwen_asr', 'fireredvad', 'ten_vad', 'transformers'))",
     )
+    if cuda_index == "cu130":
+        check_linux_runtime(str(python), "check_linux_cuda_audio")
     marker.write_text(json.dumps({"version": VERSION, "revision": REVISION, "ensemble": True}), encoding="utf-8")
+    print("WhisperJAV 独立环境安装完成。运行自检即可下载并验证双遍模型、VAD 和合并。")
 
 
 if __name__ == "__main__":

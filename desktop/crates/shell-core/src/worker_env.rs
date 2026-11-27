@@ -66,6 +66,8 @@ enum Message {
 #[derive(Deserialize)]
 struct State {
     version: String,
+    #[serde(default)]
+    worker_protocol: String,
 }
 
 fn python_in(venv: &Path) -> PathBuf {
@@ -116,17 +118,27 @@ impl WorkerEnv {
             .map(str::to_string)
     }
 
-    /// 已安装的版本；没装完或装到一半失败时为 None。
-    pub fn installed_version(&self) -> Option<String> {
+    /// 识别机协议版本（附带的部署包里 protocol.py 的 WORKER_PROTOCOL_VERSION）。
+    pub(crate) fn protocol_version(&self) -> Option<String> {
+        let text = std::fs::read_to_string(self.bundle.join("src/video_turbo/protocol.py")).ok()?;
+        let line = text.lines().find(|line| line.starts_with("WORKER_PROTOCOL_VERSION ="))?;
+        Some(line.split('=').nth(1)?.trim().to_string())
+    }
+
+    fn installed_state(&self) -> Option<State> {
         let data = std::fs::read(self.root.join("state.json")).ok()?;
         let state: State = serde_json::from_slice(&data).ok()?;
         (self.venv_python().is_file() && python_in(&self.root.join(".venv-whisperjav")).is_file())
-            .then_some(state.version)
+            .then_some(state)
     }
 
-    /// 没装过或安装包升级了，需要（重新）安装。
+    pub fn installed_version(&self) -> Option<String> {
+        Some(self.installed_state()?.version)
+    }
+
     pub fn needs_install(&self) -> bool {
-        self.installed_version().is_none() || self.installed_version() != self.bundle_version()
+        let Some(state) = self.installed_state() else { return true };
+        Some(state.version) != self.bundle_version() || Some(state.worker_protocol) != self.protocol_version()
     }
 
     /// 配置文件里的顶层字段（server_url、worker_token）；没有或为空时返回 None。
@@ -276,24 +288,6 @@ impl WorkerEnv {
         self.run_script(&python, args, cancel, &mut on_event)
     }
 
-    /// 单独安装 faster-whisper 用的显卡运行库（Windows 上找不到 PyTorch 自带的运行库时）。
-    pub fn install_runtime(
-        &self,
-        cancel: &Cancel,
-        mut on_event: impl FnMut(Event),
-    ) -> Result<(), InstallError> {
-        let args: Vec<OsString> = vec![
-            "install-runtime".into(),
-            "--root".into(),
-            self.root.clone().into(),
-            "--bundle".into(),
-            self.bundle.clone().into(),
-            "--uv".into(),
-            self.uv.clone().into(),
-        ];
-        self.run_script(&self.venv_python(), args, cancel, &mut on_event)
-    }
-
     /// 写入主程序地址和接入密钥。`shared_machine`：新建配置时开启空闲检测（与桌面、游戏共用显卡）。
     pub fn configure(&self, connection: &Connection, shared_machine: bool) -> Result<(), InstallError> {
         let python = self.venv_python();
@@ -434,6 +428,10 @@ mod tests {
         assert!(worker.needs_install());
         let current = worker.bundle_version().unwrap();
         std::fs::write(root.join("state.json"), format!(r#"{{"version":"{current}"}}"#)).unwrap();
+        assert!(worker.needs_install());
+        let protocol = worker.protocol_version().unwrap();
+        let state = serde_json::json!({"version": current, "worker_protocol": protocol});
+        std::fs::write(root.join("state.json"), state.to_string()).unwrap();
         assert!(!worker.needs_install());
         let _ = std::fs::remove_dir_all(root);
     }

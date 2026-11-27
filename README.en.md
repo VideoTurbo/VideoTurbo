@@ -37,6 +37,8 @@ docker compose up -d
 Open `http://<main-app-ip>:8765` and set an admin password. For installation details, first-time setup, GPU PCs, the FAQ and updating, see the
 **[documentation](https://videoturbo.github.io/en/guide/introduction/)**.
 
+Linux NVIDIA subtitle workers use PyTorch 2.12.1 with CUDA 13.0 to match Jasna and require NVIDIA driver 580 or later. WhisperJAV uses Qwen3-ASR for a single pass and adds anime-whisper for Japanese two-pass recognition.
+
 ## Contributing
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and conventions, and [SECURITY.md](SECURITY.md) to report vulnerabilities privately.
@@ -45,7 +47,6 @@ Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
 
 - [WhisperJAV](https://github.com/meizhong986/WhisperJAV): the recognition pipeline of the default mode.
 - [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B), [anime-whisper](https://huggingface.co/litagin/anime-whisper): speech recognition models.
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper): the Faster-Whisper mode.
 - [Jasna](https://github.com/Kruk2/jasna): video restoration.
 - FFmpeg, FastAPI, Vue, Naive UI and other open-source projects.
 

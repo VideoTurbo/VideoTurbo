@@ -25,20 +25,7 @@ class IdleConfig(WorkerConfigBase):
 
 
 class AsrConfig(WorkerConfigBase):
-    model: str = "large-v3"
-    compute_type: str = "float16"
-    beam_size: int = Field(default=5, ge=1)
-    vad_filter: bool = False
-    vad_min_silence_duration_ms: int = Field(default=500, ge=100, le=5000)
-    condition_on_previous_text: bool = False
-    hallucination_silence_threshold: float | None = Field(default=2.0, ge=0)
     max_cue_duration_seconds: float = Field(default=6.0, ge=1.0, le=15.0)
-    max_cue_chars: int = Field(default=28, ge=4, le=100)
-    min_cue_chars: int = Field(default=6, ge=1, le=30)
-    max_word_gap_seconds: float = Field(default=0.8, ge=0.1, le=5.0)
-    merge_short_cue_gap_seconds: float = Field(default=1.5, ge=0.1, le=5.0)
-    chunk_seconds: int = Field(default=300, ge=30, le=1800)
-    retry_chunk_seconds: int = Field(default=30, ge=10, le=120)
     download_root: Path = Path("models")
     # 桌面版开启：只报告模型已下载的识别模式，识别时不联网下载模型（模型由用户在模型清单里下载）。
     local_models_only: bool = False

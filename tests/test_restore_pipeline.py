@@ -41,7 +41,7 @@ def _start(tmp_path: Path, monkeypatch) -> Path:
 
 def _register(client: TestClient, name: str, **extra) -> dict:
     payload = {
-        "name": name, "version": "0.0.0", "gpu_name": "RTX", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["faster_whisper"],
+        "name": name, "version": "0.0.0", "gpu_name": "RTX", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["whisperjav"],
         "supports_restore": True, "restore_models": ["basicvsrpp"], **extra,
     }
     return client.post("/api/workers/register", json=payload, headers=HEADERS).json()

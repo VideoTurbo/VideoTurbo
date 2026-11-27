@@ -304,7 +304,7 @@ def test_restore_end_to_end_with_resumed_transfers(tmp_path: Path, monkeypatch) 
 
         # 旧 Worker（未声明影片修复能力）领不到任务；LTX 任务只给声明 ltx 的 Worker。
         registration = {
-            "name": "w1", "version": "0.0.0", "gpu_name": "RTX", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["faster_whisper"],
+            "name": "w1", "version": "0.0.0", "gpu_name": "RTX", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["whisperjav"],
         }
         client.post("/api/workers/register", json=registration, headers=headers)
         assert client.post("/api/workers/w1/restore/claim", headers=headers).json() is None
@@ -399,7 +399,7 @@ def test_worker_failure_and_retry(tmp_path: Path, monkeypatch) -> None:
         ).json()["created"][0]
         asyncio.run(real_process_once())
         registration = {
-            "name": "w1", "version": "0.0.0", "gpu_name": "RTX", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["faster_whisper"],
+            "name": "w1", "version": "0.0.0", "gpu_name": "RTX", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["whisperjav"],
             "supports_restore": True, "restore_models": ["basicvsrpp"],
         }
         client.post("/api/workers/register", json=registration, headers=headers)

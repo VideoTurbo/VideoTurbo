@@ -81,7 +81,7 @@ def test_gateway_serves_worker_api_only(tmp_path: Path, monkeypatch) -> None:
         assert gateway.post("/api/workers/register", json={}, headers=HEADERS).status_code == 422
         registered = gateway.post(
             "/api/workers/register",
-            json={"name": "w", "version": "0.0.0", "gpu_name": "g", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["faster_whisper"]},
+            json={"name": "w", "version": "0.0.0", "gpu_name": "g", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["whisperjav"]},
             headers=HEADERS,
         )
         assert registered.status_code == 200
@@ -104,7 +104,7 @@ def test_chunked_upload_out_of_order(tmp_path: Path, monkeypatch) -> None:
         database.update_restore_job(job_id, state="WAITING", source_sha256="a" * 64)
         client.post(
             "/api/workers/register",
-            json={"name": "w", "version": "0.0.0", "gpu_name": "g", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["faster_whisper"],
+            json={"name": "w", "version": "0.0.0", "gpu_name": "g", "memory_total_mb": 1, "model": "m", "compute_type": "c", "supported_asr_modes": ["whisperjav"],
                   "supports_restore": True, "restore_models": ["basicvsrpp"]},
             headers=HEADERS,
         )

@@ -275,7 +275,7 @@ def launch_env(tmp_path: Path, monkeypatch):
 def _register(db: Database, name: str) -> None:
     db.register_worker(
         WorkerRegistration(
-            name=name, version="0.0.0", gpu_name="RTX 5090", memory_total_mb=32000, model="m", compute_type="f16", supported_asr_modes=["faster_whisper"]
+            name=name, version="0.0.0", gpu_name="RTX 5090", memory_total_mb=32000, model="m", compute_type="f16", supported_asr_modes=["whisperjav"]
         )
     )
 

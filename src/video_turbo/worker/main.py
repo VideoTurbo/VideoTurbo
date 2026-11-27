@@ -28,16 +28,10 @@ from ..naming import job_dir as cache_job_dir
 from ..protocol import PROTOCOL_HEADER, PROTOCOL_MISMATCH_STATUS, WORKER_PROTOCOL_VERSION
 from ..security import sha256_file
 from . import model_catalog
-from .asr import Transcriber, TranscriptionCancelled
+from .asr import TranscriptionCancelled
 from .config import WorkerConfig, load_worker_config
 from .errors import describe_asr_failure
-from .gpu import (
-    configure_cuda_dll_paths,
-    cuda_runtime_ready,
-    query_gpu,
-    select_device,
-    torch_lib_dir,
-)
+from .gpu import query_gpu, select_device
 from .gpu_lock import GpuLock
 from .jasna import self_test as jasna_self_test
 from .restore_pipeline import RestorePipeline
@@ -78,7 +72,6 @@ class Worker:
         self.gpu = GpuLock(config.gpu_lock_file)
         self.current_job_id: str | None = None
         self.cancel_requested = threading.Event()
-        self.model_reserved_mb = 0
         self.asr_progress_lock = threading.Lock()
         self.asr_completed_chunks: int | None = None
         self.asr_total_chunks: int | None = None
@@ -87,7 +80,9 @@ class Worker:
         self.asr_stage: str | None = None
         self.asr_whisperjav_progress: WhisperJavProgress | None = None
         self.task_kind: str | None = None
-        self.transcriber = Transcriber(config)
+        self.transcriber = WhisperJavTranscriber(
+            config, self._update_asr_stage, self._update_whisperjav_progress, self._asr_elapsed
+        )
         self.headers = {
             "X-Worker-Token": config.worker_token,
             PROTOCOL_HEADER: str(WORKER_PROTOCOL_VERSION),
@@ -123,19 +118,17 @@ class Worker:
     def supported_asr_modes(self) -> list[str]:
         if self.role != "asr":
             return []
-        modes = ["faster_whisper"]
+        modes = []
         python = self.config.whisperjav.python_executable
         if python and python.is_file():
             marker = self._whisperjav_marker()
             try:
                 if json.loads(marker.read_text())["version"] == WHISPERJAV_VERSION:
-                    modes.insert(0, "whisperjav")
+                    modes.append("whisperjav")
             except (OSError, ValueError, KeyError):
                 pass
         if self.config.asr.local_models_only:
             downloaded, _ = model_catalog.supported_modes(self.config)
-            if not cuda_runtime_ready(torch_lib_dir(python)):
-                downloaded.discard("faster_whisper")
             modes = [mode for mode in modes if mode in downloaded]
         return modes
 
@@ -167,24 +160,8 @@ class Worker:
         device = select_device(
             self.config.device, {getattr(hardware, "device_type", "cuda"), "cpu"}, {"cuda", "cpu"}
         )
-        if mode != self.asr_mode or device != getattr(self.transcriber, "device", None):
-            if hasattr(self.transcriber, "unload"):
-                self.transcriber.unload()
-            self.model_reserved_mb = 0
-            self.transcriber = (
-                WhisperJavTranscriber(
-                    self.config,
-                    self._update_asr_stage,
-                    self._update_whisperjav_progress,
-                    self._asr_elapsed,
-                )
-                if mode == "whisperjav"
-                else Transcriber(self.config)
-            )
         self.transcriber.device = device
-        if isinstance(self.transcriber, WhisperJavTranscriber):
-            # load() only queries the GPU while device is unset, which it no longer is.
-            self.transcriber.memory_total_mb = getattr(hardware, "memory_total_mb", None)
+        self.transcriber.memory_total_mb = getattr(hardware, "memory_total_mb", None)
         logger.info("识别后端 %s 使用设备 %s。", mode, device)
         with self.asr_progress_lock:
             self.asr_mode = mode
@@ -214,8 +191,8 @@ class Worker:
                 "device_type": getattr(gpu, "device_type", "cuda"),
                 "driver_version": gpu.driver_version,
                 "memory_total_mb": gpu.memory_total_mb,
-                "model": self.config.asr.model,
-                "compute_type": self.config.asr.compute_type,
+                "model": self.config.whisperjav.model,
+                "compute_type": "float16" if getattr(gpu, "device_type", "cuda") == "cuda" else "float32",
                 "supported_asr_modes": self.supported_asr_modes(),
                 "supports_whisperjav_ensemble": self.supports_whisperjav_ensemble(),
                 "supports_restore": bool(self.restore.models),
@@ -330,10 +307,9 @@ class Worker:
         passed = 0
         while passed < self.config.idle.consecutive_checks:
             gpu = await asyncio.to_thread(self._query_hardware)
-            effective_free_mb = gpu.memory_free_mb + self.model_reserved_mb
             idle = (
                 gpu.utilization <= self.config.idle.max_gpu_utilization
-                and effective_free_mb >= self.config.idle.min_free_memory_mb
+                and gpu.memory_free_mb >= self.config.idle.min_free_memory_mb
             )
             passed = passed + 1 if idle else 0
             if passed < self.config.idle.consecutive_checks:
@@ -368,16 +344,15 @@ class Worker:
         try:
             job_dir.mkdir(parents=True, exist_ok=True)
             self._update_asr_stage(msg("worker.stage.preparing"))
-            self._select_transcriber(claim.get("asr_mode", "faster_whisper"))
+            self._select_transcriber(claim.get("asr_mode", "whisperjav"))
             language = languages.from_asr_code(str(claim["language"]))
             self.transcriber.language = str(language.asr_code)
-            if isinstance(self.transcriber, WhisperJavTranscriber):
-                self.transcriber.ensemble = bool(claim.get("whisperjav_ensemble", False))
-                if self.transcriber.ensemble and not language.supports_whisperjav_ensemble:
-                    # anime-whisper 只识别日语，主控不会这样派发；防御性拒绝。
-                    raise RuntimeError(msg("worker.noDualPass", label=language.label))
-                if self.transcriber.ensemble and not self.supports_whisperjav_ensemble():
-                    raise RuntimeError(msg("worker.dualMissing"))
+            self.transcriber.ensemble = bool(claim.get("whisperjav_ensemble", False))
+            if self.transcriber.ensemble and not language.supports_whisperjav_ensemble:
+                # anime-whisper 只识别日语，主控不会这样派发；防御性拒绝。
+                raise RuntimeError(msg("worker.noDualPass", label=language.label))
+            if self.transcriber.ensemble and not self.supports_whisperjav_ensemble():
+                raise RuntimeError(msg("worker.dualMissing"))
             if claim.get("media"):
                 self._update_asr_stage(msg("worker.stage.fetching"))
                 await self._fetch_media_audio(claim["media"], audio_path, str(claim["job_id"]))
@@ -393,31 +368,13 @@ class Worker:
                 self._update_asr_stage(msg("worker.stage.checking"))
                 if sha256_file(audio_path) != claim["audio_sha256"]:
                     raise RuntimeError(msg("worker.audioSha"))
-            gpu_before = await asyncio.to_thread(self._query_hardware)
             self._update_asr_stage(msg("worker.stage.recognizing"))
-            try:
-                cues, metadata = await asyncio.to_thread(
-                    self.transcriber.transcribe,
-                    audio_path,
-                    self.cancel_requested.is_set,
-                    self._update_asr_progress,
-                )
-            finally:
-                try:
-                    gpu_after = await asyncio.to_thread(self._query_hardware)
-                except Exception:
-                    # Hardware telemetry must not replace the original ASR exception.
-                    logger.warning("无法读取识别后的设备状态。", exc_info=True)
-                else:
-                    # 模型会常驻显存；空闲判定时加回这部分，避免把自己当成外部占用。
-                    self.model_reserved_mb = (
-                        0
-                        if self.asr_mode == "whisperjav" or self.transcriber.device != "cuda"
-                        else max(
-                            self.model_reserved_mb,
-                            gpu_before.memory_free_mb - gpu_after.memory_free_mb,
-                        )
-                    )
+            cues, metadata = await asyncio.to_thread(
+                self.transcriber.transcribe,
+                audio_path,
+                self.cancel_requested.is_set,
+                self._update_asr_progress,
+            )
             if not cues:
                 raise RuntimeError(msg("worker.noDialogue"))
             if self.cancel_requested.is_set():
@@ -659,10 +616,7 @@ class Worker:
 
 
 async def _async_main(args: argparse.Namespace) -> None:
-    configure_cuda_dll_paths()
     config = load_worker_config(args.config)
-    # 桌面版不单独安装 cuBLAS/cuDNN：faster-whisper 用 WhisperJAV 环境里 PyTorch 自带的。
-    configure_cuda_dll_paths(torch_lib_dir(config.whisperjav.python_executable))
     role = args.role
     if args.self_test:
         role = "restore" if args.restore else "asr"
@@ -690,14 +644,11 @@ async def _async_main(args: argparse.Namespace) -> None:
                 raise RuntimeError(msg("worker.noDownloadedModels"))
             for mode in modes:
                 worker._select_transcriber(mode)
-                if mode == "whisperjav":
-                    # 桌面版没下载第二遍模型时只检查第一遍。
-                    worker.transcriber.ensemble = worker.supports_whisperjav_ensemble() or not config.asr.local_models_only
-                    await asyncio.to_thread(
-                        worker.transcriber.self_test, worker.cancel_requested.is_set
-                    )
-                else:
-                    await asyncio.to_thread(worker.transcriber.load)
+                # 桌面版没下载第二遍模型时只检查第一遍。
+                worker.transcriber.ensemble = worker.supports_whisperjav_ensemble() or not config.asr.local_models_only
+                await asyncio.to_thread(
+                    worker.transcriber.self_test, worker.cancel_requested.is_set
+                )
                 logger.info("%s 识别后端自检通过。", mode)
             return
         await worker.run(once=args.once)
@@ -723,7 +674,7 @@ def main() -> None:
     parser.add_argument("--self-test", action="store_true", help="检查所选设备和模型加载")
     parser.add_argument(
         "--asr-mode",
-        choices=["whisperjav", "faster_whisper", "downloaded"],
+        choices=["whisperjav", "downloaded"],
         default="whisperjav",
         help="自检的识别模式（默认 WhisperJAV）；downloaded：模型已下载的所有模式（桌面版，不下载模型）",
     )

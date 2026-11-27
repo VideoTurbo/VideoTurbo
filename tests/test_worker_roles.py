@@ -78,9 +78,15 @@ def test_roles_register_only_their_own_capability(tmp_path: Path, monkeypatch) -
     jasna = JasnaConfig(enabled=True, executable=executable)
     monkeypatch.setattr(restore_pipeline, "probe_nvenc", lambda config: None)
 
+    python = tmp_path / ".venv-whisperjav/bin/python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (python.parent.parent / "video-turbo-whisperjav.json").write_text('{"version":"1.9.5","ensemble":true}')
+
     async def check() -> None:
-        asr = Worker(_config(tmp_path, jasna=jasna), "asr")
-        restore = Worker(_config(tmp_path, jasna=jasna), "restore")
+        config = _config(tmp_path, jasna=jasna, whisperjav={"python_executable": python})
+        asr = Worker(config, "asr")
+        restore = Worker(config, "restore")
         try:
             for worker in (asr, restore):
                 monkeypatch.setattr(
@@ -93,7 +99,8 @@ def test_roles_register_only_their_own_capability(tmp_path: Path, monkeypatch) -
             await restore.register()
             assert asr_payloads[0]["supports_restore"] is False
             assert asr_payloads[0]["restore_models"] == []
-            assert asr_payloads[0]["supported_asr_modes"]
+            assert asr_payloads[0]["supported_asr_modes"] == ["whisperjav"]
+            assert asr_payloads[0]["supports_whisperjav_ensemble"] is True
             assert restore_payloads[0]["supports_restore"] is True
             assert restore_payloads[0]["restore_models"] == ["basicvsrpp"]
             assert restore_payloads[0]["supported_asr_modes"] == []

@@ -2,7 +2,7 @@
 # VideoTurbo Linux NVIDIA Worker 管理脚本：安装、运行、停止、清理、状态与日志。
 #
 # 两个互相独立的服务：
-#   字幕识别（asr）     ：WhisperJAV / faster-whisper，同机可开多路并行（cloud4090-01、-02……）
+#   字幕识别（asr）     ：WhisperJAV，同机可开多路并行（cloud4090-01、-02……）
 #   影片修复（restore）    ：Jasna，每台机器一个实例（cloud4090-dc）
 # 两个服务都启动时串行使用 GPU（字幕优先）：影片修复只在本机字幕任务空闲时开始下一部，
 # 影片修复修复期间字幕实例暂停领取，这一部修复完再继续。
@@ -475,21 +475,15 @@ github_api() {
     return 1
 }
 
-# 运行环境：模型下载源、CUDA 动态库路径。前台自检和后台守护进程共用。
+# 运行环境：模型下载源。前台自检和后台守护进程共用。
 prepare_runtime_env() {
-    # large-v3 等模型首次下载及缓存缺失文件走测速选出的 Hugging Face 地址。
+    # WhisperJAV 模型首次下载及缓存缺失文件走测速选出的 Hugging Face 地址。
     select_sources hf
     export HF_ENDPOINT="$HF_MIRROR_ENDPOINT"
     # 必须在 Python 导入 huggingface_hub 前设置，避免镜像下载跳转到 Xet CAS 后 401。
     export HF_HUB_DISABLE_XET="${VIDEO_TURBO_HF_HUB_DISABLE_XET:-1}"
     # 云镜像可能预设为隐藏 Hugging Face/tqdm 进度条；本项目需要显示模型下载速度。
     unset HF_HUB_DISABLE_PROGRESS_BARS TQDM_DISABLE
-    # faster-whisper/CTranslate2 使用 pip 安装的 CUDA 12 cuBLAS 和 cuDNN 9，需放入加载路径。
-    local cuda_paths
-    cuda_paths="$("$VENV_PYTHON" -c 'from video_turbo.worker.gpu import nvidia_runtime_library_paths; print(":".join(str(path) for path in nvidia_runtime_library_paths()))')"
-    if [ -n "$cuda_paths" ]; then
-        export LD_LIBRARY_PATH="$cuda_paths${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    fi
     cd "$PROJECT_ROOT"
 }
 
@@ -841,13 +835,14 @@ install_common() {
     command -v "$SYSTEM_PYTHON" >/dev/null 2>&1 || die "$(L "找不到 ${SYSTEM_PYTHON}。需要 Python 3.11 或 3.12。" "${SYSTEM_PYTHON} not found. Python 3.11 or 3.12 is required.")"
     "$SYSTEM_PYTHON" -c 'import sys; assert (3, 11) <= sys.version_info[:2] < (3, 13), "需要 Python 3.11 或 3.12"'
 
-    # 字幕：git（安装 WhisperJAV）、ffmpeg/ffprobe（识别）、libc++.so.1（TEN VAD）。
+    # 字幕：git（安装 WhisperJAV）、ffmpeg/ffprobe 和 FFmpeg 共享库（TorchCodec 解码）、libc++.so.1（TEN VAD）。
     # 影片修复：curl/wget/zstd（下载解压 Jasna）、libGL/libglib（Jasna 运行库）。
     # 两者都需要 venv/ensurepip。设置 VIDEO_TURBO_SKIP_APT=1 可禁止自动安装，仅提示缺失项。
     info "$(L "检查系统组件。" "Checking system components.")"
     if [ "$want_asr" = "1" ]; then
         command -v git >/dev/null 2>&1 || packages+=(git)
-        if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+        if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1 \
+            || ! env -u LD_LIBRARY_PATH "$SYSTEM_PYTHON" -c 'from ctypes.util import find_library; assert all(find_library(lib) for lib in ("avcodec", "avformat", "avutil", "swresample"))' >/dev/null 2>&1; then
             packages+=(ffmpeg)
         fi
         # 与 Worker 运行时一致：不继承镜像的 LD_LIBRARY_PATH，确认系统能直接加载 libc++。
@@ -914,8 +909,7 @@ install_common() {
 install_asr() {
     LOG_TAG="$(L "字幕安装" "subtitle install")"
     info "$(L "模型下载地址：${HF_MIRROR_ENDPOINT}" "Model download address: ${HF_MIRROR_ENDPOINT}")"
-    # 镜像内的 CUDA Toolkit 和预装 PyTorch 不参与；按宿主机驱动选择 PyTorch 的 cu128/cu126 轮子。
-    # 驱动不满足（如 5090 驱动低于 570）时在耗时的依赖安装前退出。
+    # 在下载字幕依赖之前检查 Jasna NVIDIA 基线（CUDA 13）。
     info "$(L "检查显卡驱动，选择合适的组件版本。" "Checking the GPU driver to choose matching components.")"
     "$SYSTEM_PYTHON" "$PROJECT_ROOT/tools/install_whisperjav.py" --check-cuda
     info "$(L "安装识别需要的组件；第一次下载时间较长。" "Installing recognition components; the first download takes a while.")"
@@ -1276,7 +1270,7 @@ menu_install() {
     say "$(L "代码版本：v$(project_version)" "Code version: v$(project_version)")"
     say "$(L "字幕识别服务：$(asr_install_summary)" "Subtitle recognition service: $(asr_install_summary)")"
     say "$(L "影片修复服务：" "Video restoration service: ")$(restore_install_summary "$latest")"
-    menu_choose "$(L "安装 / 更新" "Install / update")" "$(L "字幕识别服务（WhisperJAV，可多路并行）" "Subtitle recognition service (WhisperJAV, several in parallel)")" "$(L "影片修复服务（Jasna，需要驱动 ≥ 580 和 NVENC）" "Video restoration service (Jasna, needs driver ≥ 580 and NVENC)")" "$(L "两个都安装" "Install both")"
+    menu_choose "$(L "安装 / 更新" "Install / update")" "$(L "字幕识别服务（WhisperJAV，需要驱动 ≥ 580，可多路并行）" "Subtitle recognition service (WhisperJAV, needs driver ≥ 580, several in parallel)")" "$(L "影片修复服务（Jasna，需要驱动 ≥ 580 和 NVENC）" "Video restoration service (Jasna, needs driver ≥ 580 and NVENC)")" "$(L "两个都安装" "Install both")"
     case "$REPLY" in
         1) cmd_install asr ;;
         2) cmd_install restore ;;

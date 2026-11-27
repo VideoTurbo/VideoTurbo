@@ -236,7 +236,18 @@ V2_SKIPPED_NOTE = """
     WHERE last_error = '已跳过，不生成字幕。';
 """
 
-MIGRATIONS: tuple[Migration, ...] = (V1, V2_SKIPPED_NOTE)
+V3_WHISPERJAV = """
+UPDATE runtime_settings
+   SET value = json_set(value, '$.mode', 'whisperjav', '$.whisperjav_ensemble', json('false'))
+ WHERE key = 'asr' AND json_valid(value) AND json_extract(value, '$.mode') = 'faster_whisper';
+UPDATE workers SET supported_asr_modes_json = (
+    SELECT json_group_array(value) FROM json_each(workers.supported_asr_modes_json)
+     WHERE value = 'whisperjav'
+) WHERE json_valid(supported_asr_modes_json) AND supported_asr_modes_json LIKE '%faster_whisper%';
+UPDATE workers SET asr_mode = NULL WHERE asr_mode = 'faster_whisper';
+"""
+
+MIGRATIONS: tuple[Migration, ...] = (V1, V2_SKIPPED_NOTE, V3_WHISPERJAV)
 
 SCHEMA_VERSION = len(MIGRATIONS)
 

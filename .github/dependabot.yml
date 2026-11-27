@@ -6,9 +6,6 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    ignore:
-      # CUDA libraries must match the GPU driver / CUDA version; upgrade them deliberately, not on a schedule.
-      - dependency-name: "nvidia-*"
     groups:
       # Dependencies exported to deploy/worker/requirements/*.txt. Their PRs fail the requirements check until
       # someone checks out the branch, runs `uv run python tools/export_requirements.py`, and pushes the result.
@@ -16,8 +13,7 @@ updates:
         patterns:
           - "pydantic"
           - "pyyaml"
-          - "faster-whisper"
-          - "ctranslate2"
+          - "huggingface-hub"
           - "httpx"
           - "psutil"
         update-types: [minor, patch]

@@ -31,6 +31,27 @@ def check_ten_vad_runtime() -> None:
         ) from exc
 
 
+def check_linux_cuda_audio() -> None:
+    import io
+    import wave
+
+    import torch
+    import torchaudio
+
+    if torch.version.cuda != "13.0":
+        raise RuntimeError(f"WhisperJAV 需要 PyTorch CUDA 13.0，实际为 {torch.version.cuda}。")
+    torch.zeros(1, device="cuda")
+    torch.cuda.synchronize()
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as writer:
+        writer.setparams((1, 2, 16000, 0, "NONE", ""))
+        writer.writeframes(bytes(3200))
+    audio.seek(0)
+    samples, rate = torchaudio.load(audio)
+    if rate != 16000 or samples.shape != (1, 1600):
+        raise RuntimeError("WhisperJAV 音频解码自检失败。")
+
+
 def load_hub_fixes():
     """Load the sibling whisperjav_hub.py by path (this script runs standalone)."""
     import importlib.util

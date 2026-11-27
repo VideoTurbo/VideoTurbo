@@ -1,8 +1,8 @@
 // 字幕任务的展示文字与操作。状态和可用操作由后端给出。
-import type { AsrMode, Job, TranslationStats } from '@/api/types'
+import type { Job, TranslationStats } from '@/api/types'
 import { t } from '@/i18n'
 
-export const asrName = (mode: AsrMode | undefined) => (mode === 'whisperjav' ? 'Qwen3-ASR' : 'Faster-Whisper')
+export const asrName = (mode: string | undefined) => (mode === 'faster_whisper' ? 'Faster-Whisper' : mode === 'whisperjav' ? 'Qwen3-ASR' : mode || '—')
 
 // ---- 排序：点同一列切换升降序；换列时影片名默认升序，大小和更新时间默认降序 ----
 export type SortColumn = 'name' | 'size' | 'updated'

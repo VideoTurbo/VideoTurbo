@@ -285,29 +285,6 @@ def test_download_patches_run_before_upstream_imports():
     )
 
 
-def test_faster_whisper_uses_same_fallback(downloads, monkeypatch, tmp_path):
-    import huggingface_hub
-    from faster_whisper import utils
-
-    from video_turbo.worker.asr import _download_model_with_progress
-
-    calls = []
-
-    def snapshot(*args, **kwargs):
-        calls.append(kwargs)
-        if kwargs["endpoint"] == "https://huggingface.co":
-            return "downloaded"
-        raise TimeoutError("timeout")
-
-    monkeypatch.setattr(huggingface_hub, "snapshot_download", snapshot)
-    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda *_, **__: None)
-    monkeypatch.setattr(utils, "download_model", lambda model, **kwargs: huggingface_hub.snapshot_download(model, **kwargs))
-    assert _download_model_with_progress("repo/model", tmp_path) == "downloaded"
-    assert [call["endpoint"] for call in calls if not call.get("local_files_only")] == [
-        "https://hf-mirror.com", "https://huggingface.co",
-    ]
-
-
 def test_missing_optional_file_after_switch_is_propagated_without_more_retries(downloads):
     calls = []
 
